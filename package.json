@@ -1,0 +1,48 @@
+{
+  "name": "dsh-ensp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "华为 eNSP 网络实验自动化：后台批量 GUI 驱动、telnet 命令行、拓扑文件读写与交付文档生成",
+  "license": "MIT",
+  "author": "YunoSeng",
+  "homepage": "https://github.com/YunoSeng/dsh-ensp#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YunoSeng/dsh-ensp.git"
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "ensp",
+    "huawei",
+    "network-lab",
+    "automation"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "lib/bridge.py",
+    "lib/launch.py",
+    "lib/make_docs.py",
+    "lib/*.js",
+    "skills",
+    "locale/*.json",
+    "icon.svg"
+  ],
+  "dependencies": {},
+  "peerDependencies": {
+    "@deepseek-ai/dsh-tools": "*",
+    "@deepseek-ai/schemastery": "*"
+  }
+}

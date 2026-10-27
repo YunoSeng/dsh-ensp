@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b3b6f"/>
+      <stop offset="1" stop-color="#0b1b33"/>
+    </linearGradient>
+    <linearGradient id="wire" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#57d1ff"/>
+      <stop offset="1" stop-color="#2f8fe0"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="url(#bg)" stroke="#3f7fd1" stroke-width="2"/>
+  <g stroke="url(#wire)" stroke-width="2.4" stroke-linecap="round" fill="none">
+    <path d="M32 22 L18 34"/>
+    <path d="M32 22 L46 34"/>
+    <path d="M18 34 L18 46"/>
+    <path d="M46 34 L46 46"/>
+  </g>
+  <g fill="#dff1ff">
+    <circle cx="32" cy="22" r="5"/>
+    <circle cx="18" cy="34" r="3.4"/>
+    <circle cx="46" cy="34" r="3.4"/>
+  </g>
+  <g fill="#57d1ff">
+    <rect x="14" y="46" width="8" height="6" rx="1.6"/>
+    <rect x="42" y="46" width="8" height="6" rx="1.6"/>
+  </g>
+  <path d="M30 12 h4 v4 h-4 z" fill="#57d1ff"/>
+</svg>

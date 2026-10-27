@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "eNSP 实验自动化",
+    "description": "让 AI 直接驱动华为 eNSP：后台批量点击与截图、telnet 下发命令、读写 .topo 拓扑文件，并生成带图说明的实验交付文档。"
+  }
+}

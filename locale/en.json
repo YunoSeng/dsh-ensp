@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "eNSP Lab Automation",
+    "description": "Drive Huawei eNSP directly: batched background clicks and screenshots, telnet command delivery, .topo read/write, and lab report generation."
+  }
+}

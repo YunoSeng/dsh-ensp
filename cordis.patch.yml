@@ -1,0 +1,4 @@
+- insert:
+    - id: ensp-automation
+      name: dsh-ensp
+      config: {}
