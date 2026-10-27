@@ -1,6 +1,7 @@
 {
   "name": "dsh-ensp",
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "description": "华为 eNSP 网络实验自动化：后台批量 GUI 驱动、telnet 命令行、拓扑文件读写与交付文档生成",
   "license": "MIT",
@@ -10,9 +11,6 @@
     "type": "git",
     "url": "git+https://github.com/YunoSeng/dsh-ensp.git"
   },
-  "bugs": {
-    "url": "https://github.com/YunoSeng/dsh-ensp/issues"
-  },
   "keywords": [
     "dsh",
     "dsh-plugin",
@@ -21,16 +19,6 @@
     "network-lab",
     "automation"
   ],
-  "os": [
-    "win32"
-  ],
-  "engines": {
-    "node": ">=20"
-  },
-  "publishConfig": {
-    "access": "public",
-    "registry": "https://registry.npmjs.org/"
-  },
   "exports": {
     ".": "./index.js",
     "./locale/*.json": "./locale/*.json",
