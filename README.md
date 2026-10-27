@@ -2,6 +2,9 @@
 
 > 让 AI 直接开华为 eNSP 做网络实验：后台批量驱动 GUI、telnet 下发命令、读写 `.topo`、自动出实验报告。
 
+[![release](https://img.shields.io/github/v/release/YunoSeng/dsh-ensp)](https://github.com/YunoSeng/dsh-ensp/releases)
+[![license](https://img.shields.io/github/license/YunoSeng/dsh-ensp)](LICENSE)
+
 一个 [DSH](https://github.com/deepseek-ai)（DeepSeek Harness）插件。给 AI 装上这套工具后，它能自己打开拓扑、启动设备、下发配置、验证连通性、截图，最后生成两份带截图的 Word 实验报告。
 
 **实测环境**：Windows 10/11 + eNSP 1.3.00.100（client 1.2.0.500）+ DSH。所有坐标、坑、耗时都在真机上验证过，下面标 ⚠ 的是换机器要重新确认的点。
@@ -44,7 +47,15 @@ AI 操控 eNSP 最慢、最容易翻车的环节是**点鼠标**：真实点击�
 
 ## 安装
 
-插件是标准的 DSH bundle：`package.json` 里声明 `dsh.bundle.patch`，DSH 启动时按 `cordis.patch.yml` 加载 `index.js`。
+插件是标准的 DSH bundle：`package.json` 里声明 `dsh.bundle.patch`，DSH 启动时按 `cordis.patch.yml` 加载 `index.js`。装法三选一：
+
+| 方式 | 命令 / 写法 | 适合 |
+| --- | --- | --- |
+| 本地 link（开发） | `"dsh-ensp": "link:E:/dsh-plugins/dsh-ensp"` | 改了代码重启即生效，自己改插件时用 |
+| 直接从 GitHub 装 | `pnpm add github:YunoSeng/dsh-ensp#v0.1.0` | 不改代码，只想要某一版 |
+| Release zip | [下载 zip](https://github.com/YunoSeng/dsh-ensp/releases) 解压后用 `link:` 挂上 | 不想装 git、或机器不能访问 GitHub |
+
+下面以本地 link 为例（同理可换成 `github:` 写法）：
 
 1. 克隆到本地任意目录：
 
