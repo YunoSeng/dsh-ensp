@@ -3,7 +3,7 @@
   "version": "0.2.1",
   "private": true,
   "type": "module",
-  "description": "华为 eNSP 网络实验自动化：后台批量 GUI 驱动、telnet 命令行、拓扑文件读写与交付文档生成",
+  "description": "让 AI 更好地使用华为 eNSP 做网络实验的 DSH 插件：批量 GUI 驱动 + telnet 下发 + .topo 读写 + 实验报告生成",
   "license": "MIT",
   "author": "YunoSeng",
   "homepage": "https://github.com/YunoSeng/dsh-ensp#readme",

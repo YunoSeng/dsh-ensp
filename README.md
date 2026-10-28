@@ -1,6 +1,6 @@
 # dsh-ensp
 
-> 让 AI 直接开华为 eNSP 做网络实验：后台批量驱动 GUI、telnet 下发命令、读写 `.topo`、自动出实验报告。
+> 让 AI 更好地使用华为 eNSP 做网络实验：后台批量驱动 GUI、telnet 下发命令、读写 `.topo`、自动出实验报告。
 
 [![release](https://img.shields.io/github/v/release/YunoSeng/dsh-ensp)](https://github.com/YunoSeng/dsh-ensp/releases)
 [![license](https://img.shields.io/github/license/YunoSeng/dsh-ensp)](LICENSE)
