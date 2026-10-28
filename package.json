@@ -1,6 +1,6 @@
 {
   "name": "dsh-ensp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "华为 eNSP 网络实验自动化：后台批量 GUI 驱动、telnet 命令行、拓扑文件读写与交付文档生成",
@@ -21,13 +21,20 @@
   ],
   "exports": {
     ".": "./index.js",
+    "./mcp": "./mcp/server.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
+  },
+  "bin": {
+    "dsh-ensp-mcp": "./bin/dsh-ensp-mcp.mjs"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
     }
+  },
+  "scripts": {
+    "test": "node test/mcp-smoke.mjs"
   },
   "files": [
     "index.js",
@@ -36,6 +43,9 @@
     "lib/launch.py",
     "lib/make_docs.py",
     "lib/*.js",
+    "mcp",
+    "bin",
+    "test",
     "skills",
     "locale/*.json",
     "icon.svg"

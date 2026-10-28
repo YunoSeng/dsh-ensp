@@ -4,10 +4,13 @@
 
 [![release](https://img.shields.io/github/v/release/YunoSeng/dsh-ensp)](https://github.com/YunoSeng/dsh-ensp/releases)
 [![license](https://img.shields.io/github/license/YunoSeng/dsh-ensp)](LICENSE)
+[![MCP](https://img.shields.io/badge/MCP-stdio-blue)](mcp/server.js)
 
 一个 [DSH](https://github.com/deepseek-ai)（DeepSeek Harness）插件。给 AI 装上这套工具后，它能自己打开拓扑、启动设备、下发配置、验证连通性、截图，最后生成两份带截图的 Word 实验报告。
 
 **实测环境**：Windows 10/11 + eNSP 1.3.00.100（client 1.2.0.500）+ DSH。所有坐标、坑、耗时都在真机上验证过，下面标 ⚠ 的是换机器要重新确认的点。
+
+同一份代码还带一个 **MCP 服务器**（`bin/dsh-ensp-mcp.mjs`），Claude Desktop / Claude Code / Cursor 等客户端可以直接用，见 [作为 MCP 服务器使用](#作为-mcp-服务器使用)。
 
 ---
 
@@ -118,6 +121,52 @@ ensp_topo（读文件） < ensp_cli（telnet） < ensp_shot（窗口 DC） < ens
 
 ---
 
+## 作为 MCP 服务器使用
+
+除了 DSH 插件，仓库还带一个 **MCP（Model Context Protocol）服务器**，把同一套六个工具暴露给 Claude Desktop、Claude Code、Cursor、Trae、Cline 等任何支持 MCP 的客户端。
+
+关键点是**不复制代码**：`mcp/server.js` 调 `apply()` 用替身上下文注册工具，拿到的就是 DSH 插件用的同一批工具对象（同名、同 schema、同 handler），所以两边行为不可能漂移。传输层是手写的 stdio JSON-RPC（`mcp/protocol.js`），**整个插件零运行时依赖**。
+
+```powershell
+node bin/dsh-ensp-mcp.mjs --workspace E:/labs      # 仓库内直接跑
+npx dsh-ensp-mcp --workspace E:/labs               # 装成包之后
+```
+
+客户端配置（stdio）：
+
+```json
+{
+  "mcpServers": {
+    "ensp": {
+      "command": "node",
+      "args": ["E:/dsh-plugins/dsh-ensp/bin/dsh-ensp-mcp.mjs", "--workspace", "E:/labs"]
+    }
+  }
+}
+```
+
+`--workspace` 决定相对路径的基准与沙箱边界（默认 `$ENSP_MCP_WORKSPACE`，否则当前目录）。其它开关：`--no-restrict`、`--mode job|serve`、`--python <path>`、`--version`、`--help`。
+
+| 能力 | 状态 |
+| --- | --- |
+| `tools`（6 个，JSON Schema + 必填项，从 `defineTool` 规范化结果直接映射） | ✅ |
+| `initialize` / `notifications/initialized` / `ping` / 未知方法错误码 | ✅ |
+| server `instructions`（把 SKILL.md 的硬规则搬成 MCP 说明） | ✅ |
+| `resources` / `prompts` / 进度通知 | ⏳ 最小可用版暂未实现 |
+
+两点说明：
+
+- **MCP 不改变速度**，瓶颈仍在 GUI 驱动与窗口同步；它改变的是"谁能用"和"怎么被结构化调用"。
+- 只想搭拓扑的话，社区项目 [Heaxu/ensp-mcp](https://github.com/Heaxu/ensp-mcp) 更专业（自动布局、分区背景框、结构校验）。两者可以在同一个客户端里并存：它建图，本服务启动设备、开命令行窗口、截图、出报告。
+
+离线自测（不需要 eNSP、Python 或管理员权限）：
+
+```powershell
+npm test        # 24 项断言：协议握手、schema 映射、拓扑解析、沙箱边界、错误码
+```
+
+---
+
 ## 几个被真机教出来的设计
 
 - **点击守卫**：真实点击必须带 `expect`（`"ensp"` / 窗口标题 / 句柄）。用户很可能开着别的全屏窗口把 eNSP 盖住，裸点击会打到别人的窗口里。带 `expect` 时桥会先"置顶→取消置顶"把 eNSP 抬到最上层，再确认该坐标真的属于 eNSP 才按下，否则**拒绝点击**并报错。
@@ -204,6 +253,11 @@ lib/topo.js               .topo 解析/改写、改名建议
 lib/make_docs.py          两份 docx 的排版（python-docx）
 skills/ensp-automation/   实测操作手册（模型读的 SKILL.md）
 locale/{zh,en}.json       插件显示名
+mcp/server.js             MCP 前端：复用 apply() 注册的工具，映射 JSON Schema
+mcp/protocol.js           手写的 stdio JSON-RPC 传输（零依赖）
+mcp/instructions.js       MCP server instructions（替代 DSH 的技能注入）
+bin/dsh-ensp-mcp.mjs      MCP 命令行入口
+test/mcp-smoke.mjs        离线冒烟测试（npm test）
 ```
 
 ---
@@ -216,6 +270,8 @@ locale/{zh,en}.json       插件显示名
 - **复制拓扑文件夹后个别拓扑会崩**（设备多、含 S5700 的尤其明显），先试再批量。
 - **USG6000V 防火墙可能起不来**：控制台只回 `##` 之类的垃圾，或端口始终不开放。工具会把它报进 `notes` 并继续其余部分。
 - **丢配置**：`stop_all`、重启设备、关拓扑都会让 RAM 里没 `save` 的改动全部丢失。插件默认自动保存，除非显式传 `save: false`。
+- **MCP 端只有 tools + instructions**：没有 resources / prompts / 进度通知；调用是串行处理的，一个长任务（如 `start_all` 8.7 s）期间客户端只能等。
+- **仓库不是 npm 包**（`package.json` 保留 `private: true`）：用 `git clone` 后 `node bin/dsh-ensp-mcp.mjs` 启动，或按 [Release zip](https://github.com/YunoSeng/dsh-ensp/releases) 解压。
 - 只支持 Windows；只接管 eNSP，不碰其它程序。
 
 ---
@@ -242,6 +298,12 @@ GUI 桥可以单独驱动，便于调试坐标：
 
 ```powershell
 python lib\launch.py --job job.json     # 用 runas 起一个提权进程，跑 job.json 里的步骤
+```
+
+改动 MCP 前端后跑离线冒烟测试（24 项断言，不需要 eNSP / Python / 管理员权限）：
+
+```powershell
+npm test
 ```
 
 工具返回值必须能无损 JSON 化（DSH 会校验），插件内部用 `lossless()` 统一处理 `undefined` / `NaN` / 非普通对象。

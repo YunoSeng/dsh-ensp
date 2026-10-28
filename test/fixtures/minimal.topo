@@ -1,0 +1,8 @@
+<topo version="1.2.0">
+  <devices>
+    <dev id="1" name="SW1" model="S3700" com_port="2001" cx="300" cy="200" edit_left="284" edit_top="186" system_mac="00:00:00:00:00:01" settings=""/>
+    <dev id="2" name="SW2" model="S3700" com_port="2002" cx="520" cy="200" edit_left="504" edit_top="186" system_mac="00:00:00:00:00:02" settings=""/>
+    <dev id="3" name="PC1" model="PC" com_port="0" cx="300" cy="380" edit_left="284" edit_top="366" system_mac="00:00:00:00:00:03" settings="ip=192.168.1.10&amp;mask=255.255.255.0"/>
+  </devices>
+  <txttip content="测试拓扑：两台交换机 + 一台 PC" left="240" top="120"/>
+</topo>
