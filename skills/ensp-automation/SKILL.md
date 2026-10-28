@@ -168,8 +168,10 @@ ensp_cli { "topology_path": "lab/3-1.topo", "device": "SW1",
 | `no such hwnd ...` | 客户端崩溃或窗口重建 | 重新 `ensp_status`，必要时重启 eNSP 并重开拓扑 |
 | 点启动没反应 | 没有选中设备 / 窗口没激活 | `start_all` 已含激活+点空白+Ctrl+A；若仍无反应，检查是否被别的窗口盖住 |
 | telnet 端口 timeout | 设备没启动 / 还没起完 | `start_all` 会自己等端口；手动等 5–15 s；FW 可能要几分钟或直接失败 |
+| 首条命令超时、partial output 只有 `##` | 端口已开放但设备还没就绪（AR2220 冷启动实测第一次 20 s 超时） | 加 `command_timeout_ms: 45000` 重试一次；实测重试 269 ms 就正常，不是链路问题 |
 | `Error: The type of the included user interface must be VTY.` | 在控制台用了 VTY 专属命令 | 改用自动应答分屏 |
 | 截图为全黑/旧画面 | 窗口没绘制、已隐藏，或被遮挡 | 设备窗口必须用 `open_console` 打开后再截；主窗口用 `ensp_shot` 的窗口 DC 截图，不需要置顶 |
+| 回显截图里只有命令行、没有输出 | 旧版把行尾写成 `\r`，桥的 `type_text` 会跳过 `\r`，命令没提交 | 0.2.1 已改成 `\n`（映射 VK_RETURN）；若仍缺输出，加大 `echo_settle_ms` |
 | 打开拓扑即崩溃 | 拓扑本身/副本有问题 | 用原路径打开；先关掉其它实例 |
 | `设备窗口「SW1」当前没有显示` | 传了 `target=device` 但没给 `topology_path` | 补上 `topology_path`，或先 `open_console` |
 | GUI 桥不可用 / 一直超时 | 没装 pywin32·Pillow、`pythonExecutable` 指错，或 **UAC 授权框被拒绝**（`ShellExecuteW` 返回 1223 = 用户取消） | 看 `ensp_status.notes`；让用户以管理员身份运行 DSH，或点"是"授权一次 |

@@ -5,6 +5,21 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-29
+
+### Fixed
+
+- **`ensp_cli` 的 `echo_to_window` 从来不提交命令**：回显把每行结尾写成 `\r`，而桥的
+  `type_text` 明确跳过 `\r`（只把 `\n` 映射成 VK_RETURN），于是命令被逐字打进设备窗口后
+  一直躺在输入缓冲里，截图只有命令行、没有回显。改成 `\n` 后实测能正常执行并截到完整输出。
+- 回显的默认停顿加大：`echo_gap_ms` 600 → 900，`echo_settle_ms` 1200 → 1800，避免长回显
+  还没打印完就截图。
+
+### Docs
+
+- SKILL 错误目录补两条实测：首条命令超时且 partial output 只有 `##`（设备没就绪，加大
+  `command_timeout_ms` 重试）、回显截图缺输出（旧版 `\r` 问题）。
+
 ## [0.2.0] - 2026-10-29
 
 ### Added
@@ -38,6 +53,7 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/YunoSeng/dsh-ensp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/YunoSeng/dsh-ensp/releases/tag/v0.1.0

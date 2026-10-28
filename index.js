@@ -740,12 +740,17 @@ function createTools(config, bridge) {
             : `设备窗口「${deviceName}」打不开（试过 ${opened.tried} 个图标位置）。`)
         }
         // Real keystrokes, guarded: refuse rather than leak them into another app.
+        //
+        // The line must end with "\n": bridge type_text maps "\n" to VK_RETURN and
+        // deliberately skips "\r", so a "\r" terminator types the command but never
+        // submits it — the text then sits in the input buffer and the screenshot
+        // shows no output at all.
         const steps = []
         for (const line of args.commands) {
-          steps.push({ op: 'safetype', title: deviceName, text: `${line}\r`, per_char: 0.02 })
-          steps.push({ op: 'sleep', t: Number(args.echo_gap_ms ?? 600) / 1000 })
+          steps.push({ op: 'safetype', title: deviceName, text: `${line}\n`, per_char: 0.02 })
+          steps.push({ op: 'sleep', t: Number(args.echo_gap_ms ?? 900) / 1000 })
         }
-        steps.push({ op: 'sleep', t: Number(args.echo_settle_ms ?? 1200) / 1000 })
+        steps.push({ op: 'sleep', t: Number(args.echo_settle_ms ?? 1800) / 1000 })
         if (args.screenshot_out) {
           const out = await resolveWorkspacePath(args.screenshot_out, exec, config, { kind: 'screenshot_out' })
           await prepareOutput(out, true, 'screenshot_out')

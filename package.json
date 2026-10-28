@@ -1,6 +1,6 @@
 {
   "name": "dsh-ensp",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "type": "module",
   "description": "华为 eNSP 网络实验自动化：后台批量 GUI 驱动、telnet 命令行、拓扑文件读写与交付文档生成",
