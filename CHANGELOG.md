@@ -5,6 +5,35 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-29
+
+### Added
+
+- **`ensp_cli` 新增 `new_password`**：USG6000V 用出厂口令首次登录时会强制改密
+  （`The password needs to be changed. Change now? [Y/N]:`）。旧版要么把这个提示当成超时，
+  要么在答 `N` 之后被设备踢回 `Login authentication`。现在传 `new_password`，工具会按
+  `Y → 旧口令 → 新口令 → 确认新口令` 走完，登录后会话直接用新口令。
+  实测 USG6000V：`admin` / `Admin@123` → 新口令 `Huawei@123`，改完拿到 `<USG6000V1>` 提示符。
+
+### Fixed
+
+- **防火墙控制台登录判定失效**：`waitFor()` 返回文本后会把缓冲区清空，`loginIfNeeded()`
+  再去读 `this.buffer` 就是空的，于是用户名/口令被当成普通命令打进 `Username:` 提示符。
+  改为把 `waitFor()` 的返回文本传进登录流程。顺带处理 `Please Press ENTER.` 与
+  「又出现一次 `Username:` = 口令错误」两种情况，错误信息也从超时变成
+  `console authentication failed for user "admin" (wrong password?)`。
+- **`save` 在 AR2220 上必然失败**：旧实现先发 `save`、等确认提示、再发 `y`；AR2220 已经把
+  提示符弹回来了，这个 `y` 就成了 `Error: Unrecognized command found at '^' position.`，
+  `saved.ok` 恒为 false。改成一次性写 `save\ny\n`（LF 换行，不夹 `\r`），
+  S3700 / AR2220 / USG6000V 三型设备实测都能拿到
+  `Save the configuration successfully` / `Configuration file had been saved successfully`。
+
+### Docs
+
+- SKILL 错误目录补防火墙登录/改密、`save` 的 AR 时序两条实测记录，并注明
+  **eNSP 只有「保存拓扑」（主窗口 Ctrl+S）才会把设备配置写回 `.topo` 目录**：
+  只做设备 `save` 然后结束进程，重开拓扑仍会回到初始配置。
+
 ## [0.2.1] - 2026-10-29
 
 ### Fixed
@@ -53,7 +82,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/YunoSeng/dsh-ensp/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/YunoSeng/dsh-ensp/releases/tag/v0.1.0

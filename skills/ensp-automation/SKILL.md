@@ -107,13 +107,32 @@ ensp_cli { "topology_path": "lab/3-1.topo", "device": "SW1",
 
 ## 3.5 保存配置（收尾必做）
 
-实测 `save` 的正确姿势：**只能在用户视图**执行（系统视图下会报错），且设备会反问 `Are you sure to continue?[Y/N]`，必须答 `y`。`ensp_cli` 已经把这套做完：
+实测 `save` 的正确姿势：**只能在用户视图**执行（系统视图下会报错），且设备会反问 `Are you sure to continue?[Y/N]`（AR2220 是 `(y/n)[n]:`），必须答 `y`。`ensp_cli` 已经把这套做完：
 
-- 本批命令只要**包含配置改动**（不是纯 `display/ping/tracert/dir`），就会在最后自动 `return` → `save` → 答 `y`，耗时约 0.3–1 s。
+- 本批命令只要**包含配置改动**（不是纯 `display/ping/tracert/dir`），就会在最后自动 `return` → `save`，耗时约 0.3–1 s。
 - 返回值里的 `saved` 字段告诉你结果：`{performed:true, ok:true, output:"Save the configuration successfully."}`。`ok:false` 要人工再查一次。
 - 用户明确说"不用保存/临时实验"才传 `save:false`；单条读取想省时间也可以传 `save:false`。
 - `stop_all` / 重启设备会让**没 save 的配置全部丢失**（设备从 `vrpcfg.cfg` 重新加载），所以保存必须发生在停设备之前。
 - 校验落盘：`display saved-configuration` 能看到刚下发的条目，或 `dir` 里 `vrpcfg.cfg` 时间戳是刚才。
+
+### 3.5.1 保存拓扑（比 save 更容易漏）
+
+**设备 `save` 只写进设备自己的 flash，关掉 eNSP 后并不保证还在。** 实测：只做设备 `save`、然后结束 `eNSP_Client.exe` 进程，重开同一个 `.topo` 时配置全部回到初始状态（拓扑目录里的 `vrpcfg.cfg` 还是 0 字节、`flash.efz`/`vrpcfg.zip` 还是几个月前的时间戳）。
+
+要把配置真正留在拓扑里，收尾必须再按一次 **主窗口 Ctrl+S（保存拓扑）**：
+
+```
+ensp_gui steps=[{"op":"activate","title":"eNSP"},{"op":"key","mods":["ctrl"],"key":"s"},{"op":"sleep","t":5}]
+```
+
+按下后拓扑目录里的设备文件会立刻被回写，用文件大小/时间戳就能验证：
+
+```powershell
+$dir = Get-ChildItem "E:\...\lab\3-1" -Directory | Select-Object -First 1
+Get-ChildItem $dir.FullName -Recurse -File | ForEach-Object { "{0:yyyy-MM-dd HH:mm:ss} {1,8:N0} {2}" -f $_.LastWriteTime, $_.Length, $_.Name }
+```
+
+实测 USG6000V 拓扑按 Ctrl+S 后：`vrpcfg.cfg` 0 → 4,913 B、`vrpcfg.zip` 619 → 618 B、`flash.efz` 9,348 → 11,188 B，全部变成当时时间；随后关掉 eNSP 重开，主机名、接口地址、NAT 策略、改过的口令都还在，ping 8.8.8.8 仍然 5/5。
 
 ## 4. .topo 文件通道
 
@@ -179,12 +198,20 @@ ensp_cli { "topology_path": "lab/3-1.topo", "device": "SW1",
 | `面板可能不在可见画布内（试过 7 个图标位置）` | eNSP 主窗口被**最小化**了，`rect` 是 `-32000` 废值 | 已自动 `SW_RESTORE` 后重算；若仍失败让用户先还原 eNSP 窗口 |
 | `bridge.elevated:false` 但 eNSP 在跑 | 桥没提权，对提权窗口的消息会被 UIPI 拒绝 | 以管理员身份运行 DSH；telnet/.topo 通道仍然可用 |
 | `saved.ok:false` | `save` 回显里没有成功字样 | 补 `display saved-configuration` 核对，或 `dir` 看 `vrpcfg.cfg` 时间戳 |
+| AR2220 `save` 报 `Error: Unrecognized command found at '^' position.` | 旧版先发 `save`、等提示再发 `y`，AR 已经把提示符弹回来了 | 0.2.2 已改成一次写 `save\ny\n`（LF）；旧版可传 `commands:["save\ny"]` 手动补 |
+| `console authentication failed for user "admin"` | 口令不对，或改密流程没走完（答 `N` 会被踢回 `Login authentication`） | 先试出厂 `Admin@123`；设备要求改密时传 `new_password`（工具会走 Y→旧→新→确认） |
+| USG6000V 登录卡在 `The password needs to be changed. Change now? [Y/N]:` | 出厂口令首次登录强制改密 | `ensp_cli` 传 `username`/`password`/`new_password`，例如 `admin` + `Admin@123` → `Huawei@123` |
+| 重开 `.topo` 后配置全没了 | 只做了设备 `save`，**没保存拓扑**；eNSP 只在 Ctrl+S 时把设备 flash 写回拓扑目录 | 收尾按主窗口 **Ctrl+S**，再用 `vrpcfg.cfg`/`flash.efz` 的大小和时间戳确认 |
 | 停设备后配置全丢 | 重启会从 `vrpcfg.cfg` 重新加载，RAM 里没 `save` 的改动全丢 | 停设备**之前**先 `save`；`ensp_cli` 改配置时会自动保存 |
 
 
 ## 8. 交付清单
 
-- **两份文档**：`<任务>-说明版.docx`（每张截图下一句话说明 + 账号表）、`<任务>-纯截图版.docx`（只在题目下贴图，无任何说明文字）。
+- **两份文档**：`<任务>-说明版.docx`（每张截图下一句话说明 + 账号表）、`<任务>-纯截图版.docx`。
+  纯截图版**必须以用户给的原始题目文档为底**：原文字、原题号、原排版一律不动，只把截图塞进
+  对应题号/步骤下面的空白处（python-docx：找到 `步骤N` 段落，把它后面连续的空白段落依次填图，
+  居中、宽度取版心宽 13.5 cm 左右）。**不要自己建章节、不要重排或补题号**——生成一份只有
+  自己编号的"截图册"是错的。
 - **密码清单**：本次实验改动过的所有口令（console/VTY/AAA/SSH/enable），以及当前生效的"账号—口令"明文对照表，写在文档末尾和回复里。
 - **回显留档**：关键验证输出（ping/路由表/接口状态）连同命令一起保存。
 - **配置已落盘**：每台配过的设备 `save` 成功（`saved.ok:true`），交付时说明已保存；若用户要求不保存，明确写出来。

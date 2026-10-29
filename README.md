@@ -270,6 +270,8 @@ test/mcp-smoke.mjs        离线冒烟测试（npm test）
 - **复制拓扑文件夹后个别拓扑会崩**（设备多、含 S5700 的尤其明显），先试再批量。
 - **USG6000V 防火墙可能起不来**：控制台只回 `##` 之类的垃圾，或端口始终不开放。工具会把它报进 `notes` 并继续其余部分。
 - **丢配置**：`stop_all`、重启设备、关拓扑都会让 RAM 里没 `save` 的改动全部丢失。插件默认自动保存，除非显式传 `save: false`。
+- **`save` 不等于留在拓扑里**：设备 `save` 只写进设备 flash；要让配置跟着 `.topo` 走，收尾得在 eNSP 主窗口按 **Ctrl+S 保存拓扑**（实测：不按的话重开拓扑会回到初始配置，按了之后 `vrpcfg.cfg`/`flash.efz` 会被回写，重开确认配置和改过的口令都在）。
+- **USG6000V 首次登录强制改密**：出厂 `admin` / `Admin@123` 会先问 `The password needs to be changed. Change now? [Y/N]:`。给 `ensp_cli` 传 `new_password` 就会自动走完改密；答 `N` 会被踢回登录提示。
 - **MCP 端只有 tools + instructions**：没有 resources / prompts / 进度通知；调用是串行处理的，一个长任务（如 `start_all` 8.7 s）期间客户端只能等。
 - **仓库不是 npm 包**（`package.json` 保留 `private: true`）：用 `git clone` 后 `node bin/dsh-ensp-mcp.mjs` 启动，或按 [Release zip](https://github.com/YunoSeng/dsh-ensp/releases) 解压。
 - 只支持 Windows；只接管 eNSP，不碰其它程序。

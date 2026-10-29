@@ -62,6 +62,7 @@ const PROMPT_SECTION = `## eNSP 实验自动化（dsh-ensp）
 - 将要接管鼠标（真实点击/拖拽）前必须提醒用户，并说明会还原鼠标位置。
 - 交付时列出本次实验改动过的所有密码，以及当前生效的账号/密码对照表（明文写在文档末尾和回复里）。
 - **配置要落盘**：实验结束时每台被配置过的设备都必须 \`save\`（\`ensp_cli\` 在改配置时会自动保存，返回值里的 \`saved\` 字段会说明是否成功）。只有用户明确提出"不用保存/临时实验"时才传 \`save:false\`。收尾时逐台核对 \`saved.ok\`，别把"没存盘"的实验交给用户。
+- **保存拓扑**：设备 \`save\` 只写进设备 flash，配置能不能跟着 \`.topo\` 走取决于 eNSP 有没有保存拓扑。实验结束时用 \`ensp_gui\` 给主窗口发一次 Ctrl+S，再用拓扑目录里 \`vrpcfg.cfg\`/\`flash.efz\` 的大小和时间戳确认回写；不按的话重开拓扑会回到初始配置（实测）。
 - **少抢前台、少弹窗口**：telnet 和主窗口截图都不需要 eNSP 在前台，默认就别激活、别前置。只有两种情况需要把窗口拿到前台：截设备命令行窗口（必须先双击图标打开并抢到前台）和点非客户区（工具栏/菜单）。用完可以用 \`{op:"close_console",device:"SWX"}\` 收掉设备窗口，保持用户桌面干净。
 
 行为要点（已实测，别再踩）：
@@ -652,6 +653,7 @@ function createTools(config, bridge) {
       system_view: { type: 'boolean', description: 'Enter system-view first; defaults to false.' },
       username: { type: 'string', description: 'Username when the console asks for AAA login.' },
       password: { type: 'string', description: 'Password when the console asks for AAA login.' },
+      new_password: { type: 'string', description: 'New password to set when the device forces a password change on first login (a USG that still has the factory password asks this). Omit to decline the change.' },
       command_timeout_ms: { type: 'integer', description: 'Per-command timeout; defaults to 20000.' },
       echo_to_window: { type: 'boolean', description: 'Open the device console window and type the same commands there with real keystrokes (they execute a second time) so the window can be screenshotted the way a student would see it.' },
       save: { type: 'boolean', description: 'Write the running configuration to flash after the commands. Leave empty to save automatically whenever this batch changes the configuration (lab work must survive a device restart); pass false only when the user explicitly wants a throw-away configuration.' },
@@ -694,6 +696,7 @@ function createTools(config, bridge) {
         port,
         username: args.username,
         password: args.password,
+        newPassword: args.new_password,
         commandTimeoutMs: args.command_timeout_ms,
       })
       let prompt = ''
