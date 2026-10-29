@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-29
+
+### Added
+
+- **`ensp_doc` 新增 `template_path`**：直接用老师发的原始题目 `.docx` 当「纯截图版」的底，
+  原文、题号、排版一个字不动，把每个 section 的截图依次填进对应 `步骤N` 标题下面的空白段落
+  （空白段落不够时按最后一个空段的格式新建，截图居中、宽度 13.5 cm）。
+  - `section.heading` 写 `步骤3` 这种短标识即可自动匹配，也可以用 `anchor` 指定任意行首文字。
+  - 找不到锚点会报错并列出缺哪些，不会悄悄生成一份空文档。
+  - 实测：任务4 模板 9 个非空文字段落 → 输出仍是 9 个、图片 1 → 10；任务1 模板 75 段、
+    3 图 → 输出 75 段、11 图，`文字一致: True`。
+  - 这一步以前要临时写一段 python-docx 脚本（半小时起步），现在是一次工具调用的参数。
+
+### Docs
+
+- SKILL 交付清单补「纯截图版用 `template_path` 填原题文档」的做法。
+
 ## [0.2.2] - 2026-10-29
 
 ### Added
@@ -82,7 +99,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.2...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.3...HEAD
+[0.2.3]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/YunoSeng/dsh-ensp/compare/v0.1.0...v0.2.0

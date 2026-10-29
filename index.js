@@ -855,16 +855,17 @@ function createTools(config, bridge) {
 
   tools.push(defineTool({
     name: 'ensp_doc',
-    description: 'Build the two lab deliverables from a screenshot manifest: a captioned report (one short sentence under each screenshot) and a bare copy (screenshots only, no prose), plus the plaintext credential table.',
+    description: 'Build the two lab deliverables from a screenshot manifest: a captioned report (one short sentence under each screenshot) and a bare copy (screenshots only, no prose), plus the plaintext credential table. Pass template_path to make the bare copy out of the teacher\'s original .docx: its text, numbering and layout stay untouched and each section\'s screenshots go into the blank paragraphs after that step.',
     parameters: {
       title: { type: 'string', required: true, description: 'Report title, usually the lab task name.' },
       output_dir: { type: 'string', required: true, description: 'Directory inside the workspace for the .docx files.' },
       sections: {
         type: 'array',
         required: true,
-        description: 'Ordered sections: {heading, paragraphs?, commands?, images:[{path, caption?}]}. In the bare copy only heading + images survive.',
+        description: 'Ordered sections: {heading, paragraphs?, commands?, images:[{path, caption?, width_cm?}], anchor?}. In the bare copy only heading + images survive. With template_path the heading (or anchor) must start with the template line it belongs under, e.g. "步骤3".',
         items: { type: 'object', additionalProperties: true },
       },
+      template_path: { type: 'string', description: 'Original task .docx for the bare copy. Its paragraphs are preserved byte for byte; screenshots fill the blank lines under each 步骤N.' },
       subtitle: { type: 'string', description: 'Line under the title (name / class / date).' },
       credentials: { type: 'array', items: { type: 'object', additionalProperties: true }, description: 'Password table rows: {item, value}.' },
       notes: { type: 'array', items: { type: 'string' }, description: 'Closing notes (captioned copy only).' },
@@ -896,6 +897,10 @@ function createTools(config, bridge) {
         if (existsSync(bareOut)) throw new Error(`bare report already exists: ${bareOut}`)
       }
       const sections = Array.isArray(args.sections) ? args.sections : []
+      let template = ''
+      if (args.template_path) {
+        template = await resolveWorkspacePath(args.template_path, exec, config, { mustExist: true, kind: 'template_path' })
+      }
       const manifestBase = {
         title: args.title,
         subtitle: args.subtitle,
@@ -908,6 +913,10 @@ function createTools(config, bridge) {
       const built = []
       for (const [mode, out] of [['captioned', captionedOut], ['bare', bareOut]]) {
         const manifest = { ...manifestBase, mode, output: out }
+        if (mode === 'bare' && template) {
+          manifest.mode = 'template'
+          manifest.template = template
+        }
         const manifestPath = join(dirWork, `${mode}.json`)
         await writeFile(manifestPath, JSON.stringify(manifest, null, 1), 'utf8')
         const run = await runProcess(python, [DOCS_SCRIPT, manifestPath], { timeoutMs: 120000 })
