@@ -896,7 +896,17 @@ function createTools(config, bridge) {
         if (existsSync(captionedOut)) throw new Error(`captioned report already exists: ${captionedOut}`)
         if (existsSync(bareOut)) throw new Error(`bare report already exists: ${bareOut}`)
       }
-      const sections = Array.isArray(args.sections) ? args.sections : []
+      const sections = []
+      for (const section of Array.isArray(args.sections) ? args.sections : []) {
+        const images = []
+        for (const image of Array.isArray(section.images) ? section.images : []) {
+          if (!image || typeof image.path !== 'string' || !image.path.trim()) continue
+          // Relative paths are relative to the workspace, not to the python cwd.
+          const resolved = await resolveWorkspacePath(image.path, exec, config, { mustExist: true, kind: 'image path' })
+          images.push({ ...image, path: resolved })
+        }
+        sections.push({ ...section, images })
+      }
       let template = ''
       if (args.template_path) {
         template = await resolveWorkspacePath(args.template_path, exec, config, { mustExist: true, kind: 'template_path' })

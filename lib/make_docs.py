@@ -91,15 +91,67 @@ def add_image(doc, path, caption, *, captioned, width_cm=MAX_IMAGE_WIDTH_CM):
         run._element.rPr.rFonts.set(qn("w:eastAsia"), BODY_FONT)
 
 
+A_BLIP = '{http://schemas.openxmlformats.org/drawingml/2006/main}blip'
+R_EMBED = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed'
+R_LINK = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}link'
+R_ID = '{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id'
+V_IMAGEDATA = '{urn:schemas-microsoft-com:vml}imagedata'
+WP_EXTENT = '{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent'
+WPS_EXT = '{http://schemas.microsoft.com/office/word/2010/wordprocessingShape}ext'
+
+
+def _has_picture(paragraph):
+    """True when the paragraph really shows a picture (a text box is not one)."""
+    for blip in paragraph._p.findall('.//' + A_BLIP):
+        if blip.get(R_EMBED) or blip.get(R_LINK):
+            return True
+    for image in paragraph._p.findall('.//' + V_IMAGEDATA):
+        if image.get(R_ID):
+            return True
+    return False
+
+
 def _is_blank(paragraph):
-    """True for a paragraph that holds neither text nor a picture."""
+    """A fillable slot: no text and no real picture.
+
+    Teacher documents often leave an *empty text box* as the photo frame — that
+    still counts as a slot, otherwise every screenshot slides down to the next
+    plain empty line (or past the next heading).
+    """
     if paragraph.text.strip():
         return False
-    if paragraph._p.findall('.//' + qn('w:drawing')):
-        return False
-    if paragraph._p.findall('.//' + qn('w:pict')):
-        return False
-    return True
+    return not _has_picture(paragraph)
+
+
+def _frame_width_cm(paragraph):
+    """Width of the text box that wraps this paragraph, if it has one."""
+    for tag in (WP_EXTENT, WPS_EXT):
+        for extent in paragraph._p.findall('.//' + tag):
+            raw = extent.get('cx')
+            if raw and raw.isdigit():
+                return int(raw) / 360000.0
+    return None
+
+
+def _fill_slot(paragraph, path, width_cm):
+    """Put one picture into a slot, inside its text box when there is one."""
+    content = paragraph._p.find('.//' + qn('w:txbxContent'))
+    if content is not None:
+        for child in list(content):
+            if child.tag == qn('w:p'):
+                content.remove(child)
+        holder = OxmlElement('w:p')
+        content.append(holder)
+        target = Paragraph(holder, paragraph._parent)
+        frame = _frame_width_cm(paragraph)
+        if frame:
+            width_cm = min(width_cm, max(frame - 0.2, 3.0))
+    else:
+        target = paragraph
+        for run in list(target.runs):
+            run._r.getparent().remove(run._r)
+    target.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    target.add_run().add_picture(path, width=Cm(width_cm))
 
 
 def _anchor_key(section):
@@ -153,7 +205,7 @@ def fill_template(template_path, out_path, sections, width_cm=13.5):
             if j < len(blanks):
                 target = blanks[j]
             else:
-                # Ran out of blank lines: clone the formatting of the last one.
+                # Ran out of slots: clone the formatting of the last one.
                 new_p = OxmlElement('w:p')
                 source = blanks[-1]._p if blanks else None
                 if source is not None:
@@ -163,10 +215,7 @@ def fill_template(template_path, out_path, sections, width_cm=13.5):
                 anchor._p.addnext(new_p)
                 target = Paragraph(new_p, anchor._parent)
             anchor = target
-            for run in list(target.runs):
-                run._r.getparent().remove(run._r)
-            target.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            target.add_run().add_picture(path, width=Cm(width))
+            _fill_slot(target, path, width)
 
     os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
     if os.path.exists(out_path):

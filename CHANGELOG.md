@@ -18,6 +18,18 @@
     3 图 → 输出 75 段、11 图，`文字一致: True`。
   - 这一步以前要临时写一段 python-docx 脚本（半小时起步），现在是一次工具调用的参数。
 
+### Fixed
+
+- **`save` 在 S5700 上卡在「请输入文件名」**：S5700 在 `[Y/N]` 之后还会问
+  `Please input the file name ( *.cfg, *.zip ) [vrpcfg.zip]:`，旧逻辑等提示符等到超时、
+  `saved.ok` 为 false。现在识别到这个提问就补一个回车（用默认的 `vrpcfg.zip`），
+  实测回显 `Save the configuration successfully.`。
+- **`ensp_doc` 的截图相对路径失效**：python 子进程的工作目录不是 DSH 工作区，
+  传 `工作区/截图/x.png` 会报 `missing image`。现在图片路径进 manifest 之前统一按工作区解析。
+- **模板里的「空文本框」被当成非空行**：老师给的模板常用无图片的文本框当照片框，
+  旧判定见 `w:drawing`/`w:pict` 就跳过，导致截图滑到下一个标题下面。现在只有真正带图片关系
+  的段落才算已占用，图片会被放进文本框内部（宽度按框宽收一点，避免溢出）。
+
 ### Docs
 
 - SKILL 交付清单补「纯截图版用 `template_path` 填原题文档」的做法。
