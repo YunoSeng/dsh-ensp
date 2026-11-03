@@ -661,6 +661,7 @@ function createTools(config, bridge) {
       echo_settle_ms: { type: 'integer', description: 'Wait after typing before the screenshot; defaults to 1200.' },
       echo_gap_ms: { type: 'integer', description: 'Pause between echoed commands; defaults to 600.' },
       allow_cursor_takeover: { type: 'boolean', description: 'Acknowledge a real click may be used to open the device window.' },
+      output_file: { type: 'string', description: 'Also write the full transcript to this .txt path. Long tool results may be compressed in transit (e.g. to a <<ccr:...>> marker); writing them to a file lets you grep or page them afterwards.' },
     },
     output: {
       schema: {
@@ -673,6 +674,7 @@ function createTools(config, bridge) {
           results: { type: 'array', items: { type: 'object', additionalProperties: true }, required: true },
           echo: { type: 'object', additionalProperties: true },
           screenshot: { type: 'string' },
+          transcript: { type: 'string' },
           saved: { type: 'object', additionalProperties: true },
           notes: { type: 'array', items: { type: 'string' }, required: true },
         },
@@ -770,7 +772,18 @@ function createTools(config, bridge) {
         if (failures.length > 0) notes.push(`回显失败 ${failures.length} 步：${failures[0].error}`)
       }
 
-      return lossless({ device: deviceName, port, prompt, results, echo, screenshot, saved, notes })
+      let transcript
+      if (args.output_file) {
+        const out = await resolveWorkspacePath(args.output_file, exec, config, { kind: 'output_file' })
+        await prepareOutput(out, true, 'output_file')
+        const body = results
+          .map((row) => `### ${row.command}\n${row.output ?? ''}`)
+          .join('\n\n')
+        await writeFile(out, `${body}\n`, 'utf8')
+        transcript = out
+      }
+
+      return lossless({ device: deviceName, port, prompt, results, echo, screenshot, transcript, saved, notes })
     },
   }))
 

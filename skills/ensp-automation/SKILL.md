@@ -12,10 +12,18 @@ description: 用 dsh-ensp 插件操作华为 eNSP：后台批量 GUI 驱动、te
 1. `ensp_status`：看有没有已打开的 eNSP、本机装了几个版本、桥是否可用（`bridge.elevated` 必须是 true）。
    - 有正在运行的实例 → 直接接管，别重开。
    - 没运行 → 问用户是否要用某个版本（多个版本必须问）。
-2. 需要真实点击（启动设备、拖设备）时先提醒用户"将短暂接管鼠标，结束后还原"。
-3. 要截图时先问用户：**是否关闭显示调试信息**（`undo debugging all`、`undo terminal monitor`），否则回显里会混入调试日志。
-4. 需要改名时问用户：按重要程度编号（SW1/SW2、AR1/AR2、FW1）；用户给了规则以用户为准。
-5. **收尾必须保存配置**（见 3.5）：用户没说"不用保存"，就要每台配过的设备都落盘。
+2. **命令先查表**：`reference/commands.md` 是插件内置的 VRP 命令速查（含 NAT/安全策略/ARP/VLAN/路由/验证命令
+   和「报错 → 处理」对照）。表里有的直接下发，**不要联网搜**；只有设备真的回了
+   `Error: ...` / `Unrecognized command` / `Wrong parameter` 才去搜，搜到实测通过后补回表里。
+3. 需要真实点击（启动设备、拖设备）时先提醒用户"将短暂接管鼠标，结束后还原"。
+4. 要截图时先问用户：**是否关闭显示调试信息**（`undo debugging all`、`undo terminal monitor`），否则回显里会混入调试日志。
+5. 需要改名时问用户：按重要程度编号（SW1/SW2、AR1/AR2、FW1）；用户给了规则以用户为准。
+6. **收尾必须保存配置**（见 3.5）：用户没说"不用保存"，就要每台配过的设备都落盘。
+
+> **无人值守 / 子代理降级策略**：上面 3–5 条要"先问用户"，但被别的 agent 委派时 `ask_user_question`
+> 会直接失败（`human interaction is unavailable`）。这种情况下按默认值继续，不要卡住：
+> 默认 `undo debugging all` + `undo terminal monitor`；默认不改设备名（除非题目提示符要求）；
+> 关掉别人开着的拓扑前先 Ctrl+S 保存。
 
 ## 1. 通道选择（从快到慢）
 
@@ -50,6 +58,29 @@ description: 用 dsh-ensp 插件操作华为 eNSP：后台批量 GUI 驱动、te
 {"op":"show","title":"SW1"}                         // ⚠ 对设备窗口无效，见下
 {"op":"texts","hwnd":123456,"depth":3}              // 读对话框上的文字（WM_GETTEXT）
 ```
+
+### 切换拓扑（从 A 拓扑换到 B 拓扑）
+
+**首选一条调用**（`open` 会把 .topo 直接打开，不是只启动 eNSP）：
+
+```json
+ensp_gui steps=[
+  {"op":"kill","names":["eNSP_Client.exe"]},
+  {"op":"sleep","t":3},
+  {"op":"open","path":"E:/…/【实训任务3.3】….topo"},
+  {"op":"sleep","t":14}
+]
+```
+
+然后 `start_all`（带 `topology_path`）即可。
+
+- 不想杀进程时：先 Ctrl+S 保存当前拓扑 → `{"op":"close","hwnd":<主窗口>}` → 弹出的是**自绘保存框**，
+  `texts` 只读到 `Button1/2/3` 没有文字、`bmclick` 点了没反应，必须 `ensp_shot` 截图看位置再真实点击 →
+  最后仍然用 `{"op":"open","path":…}` 打开新拓扑。
+- ⚠ **不要把 .topo 路径当命令行参数传给 `eNSP_Client.exe`**（`spawn` / `explore` 带参）：只会开出一个
+  空白的「新建拓扑」画布，看起来像打开了、其实 0 台设备。
+- 判断到底开没开：`ensp_status` 的实例标题不是「新建拓扑」，且 `ensp_topo action=list` 能列出设备；
+  画布空白就是没开。
 
 ### 点击策略
 - 状态栏、工具栏、菜单在**非客户区**，消息投递无效，只能真实点击（`click` 带 `restore:true`）。
@@ -98,6 +129,12 @@ description: 用 dsh-ensp 插件操作华为 eNSP：后台批量 GUI 驱动、te
 - 分屏：VRP 控制台不支持 `screen-length 0 temporary`（会报 `The type of the included user interface must be VTY.`）；`ensp_cli` 已自动应答 `---- More ----`。
 - 配置命令用 `system_view:true` 进入 `system-view`；`quit`/`return` 自己按需写进命令列表。
 - 防火墙 USG6000V：控制台可能只回 `##` 之类的垃圾或根本没起来。**不要卡在这里**，告知用户后跳过，其余设备照常做。
+- 防火墙默认凭据：账号 `admin`、口令 `Admin@123`（首次可能强制改密 → 传 `new_password`）。
+- **长回显可能被上层压缩**：结果超过几百字节时，`results[].output` 可能被替换成 `<<ccr:…,1.2KB>>` 这类标记，
+  `| include` 过滤也救不回来。对策（按顺序试）：
+  1. 传 `output_file: "工作区/回显/xx.txt"` 把完整回显落盘，再用 `ops_grep` 精确检索；
+  2. 用 `echo_to_window:true` + `screenshot_out` 截图，`read_image` 看回显（学生视角也更真实）；
+  3. 把一条大命令拆成几条小的（`display current-configuration | include nat` 而不是整份配置）。
 
 典型流程：
 ```json
@@ -149,7 +186,12 @@ Get-ChildItem $dir.FullName -Recurse -File | ForEach-Object { "{0:yyyy-MM-dd HH:
 2. 规划：谁做网关、谁做 DNS/Web、地址段从标注里读，不要自己编。
 3. 改名/IP 能离线做就先用 `ensp_topo` 改，再开拓扑。
 4. 启动设备 → `ensp_status include_telnet:true` 确认端口开放。
-5. 配置依次下发（`ensp_cli` + `system_view`），每台设备配完立刻复制回显留档；**配完就 `save`**（`ensp_cli` 会自动做，检查 `saved.ok`）。
+5. **先看再配**：拓扑可能已经预配了一部分（接口地址、静态路由），盲配会得到
+   `Error: The address already exists.` / `Error: The route already exists.`。
+   先跑一条 `display ip interface brief` + `display ip routing-table` 摸清基线，已有的跳过。
+   设备名 vs 主机名：`.topo` 里的 `name` 是图标名，VRP 主机名是另一回事（USG 出厂叫 `USG6000V1`）；
+   题目提示符写 `[FW]` 时，用 `sysname FW` 对齐，截图和文档才对得上。
+6. 配置依次下发（`ensp_cli` + `system_view`），每台设备配完立刻复制回显留档；**配完就 `save`**（`ensp_cli` 会自动做，检查 `saved.ok`）。
 6. **验证**（见下），不通过就查错误目录，不要急着截图。
 7. 截图：需要"像学生手动做"的界面时，用 `ensp_cli echo_to_window:true` 把同样命令用**真实键盘**打进设备窗口再截（命令会真的再执行一次，`display` 类命令无所谓，配置类命令要挑不会报错的写法）。回显前工具会先确认窗口可见并抢到前台，抢不到就拒绝打字而不是乱打。截完用 `close_console` 收掉窗口。
 8. `ensp_doc` 出两份文档；回复里列改动过的密码和账号表。

@@ -5,13 +5,30 @@
 
 ## [Unreleased]
 
+### Added
+
+- **内置命令速查 `skills/ensp-automation/reference/commands.md`**：把 VRP 的常用命令固化进插件——
+  通用/交换 VLAN/ARP 安全/防火墙基础/安全策略/源 NAT（NAPT、Easy-IP）/目的 NAT 与 NAT Server/双向 NAT/
+  路由/验证命令，外加「报错 → 处理」对照表。规则也写进 SKILL §0：**先查表，只有设备真的报错才联网搜，
+  搜到实测通过后补回表里**。
+- **`ensp_cli` 新增 `output_file`**：把完整回显同时写到工作区里的 `.txt`，返回值多一个 `transcript` 路径。
+  用于对抗上层对长工具结果的压缩（结果超过几百字节时可能被替换成 `<<ccr:…>>` 标记），
+  写盘后可以再用检索工具精确查。
+
+### Docs
+
+- SKILL 补：**切换拓扑**的可靠做法（`ensp_gui {op:"open",path:…}` 一条调用完成；不要把 `.topo` 当命令行参数
+  传给 `eNSP_Client.exe`，那样只会开出一个空白画布）、自绘保存对话框只能截图后真实点击、
+  USG6000V 默认凭据、长回显被压缩时的三种对策、**先 display 再下发**（拓扑可能预配过）、
+  设备图标名与 VRP 主机名的区别、以及无人值守/子代理场景下「先问用户」类规范的降级默认值。
+
 ## [0.2.4] - 2026-11-03
 
 ### Added
 
 - **模板模式支持 `anchor: "#picN"`**：按「模板里第 N 张图所在的段落」定位，用于把实际拓扑图
   插在题目自带的参考拓扑图正下方——有些题目图后面直接接正文、没有 `图1 …` 图注，只能靠图片
-  定位。有图注的（如 `图1 NAPT实验拓扑图`）继续用 `heading: "图1"`。
+  定位。有图注的继续用 `heading: "图1"`。
 
 ### Docs
 
@@ -28,16 +45,14 @@
   （空白段落不够时按最后一个空段的格式新建，截图居中、宽度 13.5 cm）。
   - `section.heading` 写 `步骤3` 这种短标识即可自动匹配，也可以用 `anchor` 指定任意行首文字。
   - 找不到锚点会报错并列出缺哪些，不会悄悄生成一份空文档。
-  - 实测：任务4 模板 9 个非空文字段落 → 输出仍是 9 个、图片 1 → 10；任务1 模板 75 段、
-    3 图 → 输出 75 段、11 图，`文字一致: True`。
   - 这一步以前要临时写一段 python-docx 脚本（半小时起步），现在是一次工具调用的参数。
 
 ### Fixed
 
 - **`save` 在 S5700 上卡在「请输入文件名」**：S5700 在 `[Y/N]` 之后还会问
   `Please input the file name ( *.cfg, *.zip ) [vrpcfg.zip]:`，旧逻辑等提示符等到超时、
-  `saved.ok` 为 false。现在识别到这个提问就补一个回车（用默认的 `vrpcfg.zip`），
-  实测回显 `Save the configuration successfully.`。
+  `saved.ok` 为 false。现在识别到这个提问就补一个回车（用默认的 `vrpcfg.zip`），保存后正常回
+  `Save the configuration successfully.`。
 - **`ensp_doc` 的截图相对路径失效**：python 子进程的工作目录不是 DSH 工作区，
   传 `工作区/截图/x.png` 会报 `missing image`。现在图片路径进 manifest 之前统一按工作区解析。
 - **模板里的「空文本框」被当成非空行**：老师给的模板常用无图片的文本框当照片框，
@@ -56,7 +71,6 @@
   （`The password needs to be changed. Change now? [Y/N]:`）。旧版要么把这个提示当成超时，
   要么在答 `N` 之后被设备踢回 `Login authentication`。现在传 `new_password`，工具会按
   `Y → 旧口令 → 新口令 → 确认新口令` 走完，登录后会话直接用新口令。
-  实测 USG6000V：`admin` / `Admin@123` → 新口令 `Huawei@123`，改完拿到 `<USG6000V1>` 提示符。
 
 ### Fixed
 
@@ -68,12 +82,12 @@
 - **`save` 在 AR2220 上必然失败**：旧实现先发 `save`、等确认提示、再发 `y`；AR2220 已经把
   提示符弹回来了，这个 `y` 就成了 `Error: Unrecognized command found at '^' position.`，
   `saved.ok` 恒为 false。改成一次性写 `save\ny\n`（LF 换行，不夹 `\r`），
-  S3700 / AR2220 / USG6000V 三型设备实测都能拿到
-  `Save the configuration successfully` / `Configuration file had been saved successfully`。
+  S3700 / AR2220 / USG6000V 都会回 `Save the configuration successfully` /
+  `Configuration file had been saved successfully`。
 
 ### Docs
 
-- SKILL 错误目录补防火墙登录/改密、`save` 的 AR 时序两条实测记录，并注明
+- SKILL 错误目录补防火墙登录/改密、`save` 的 AR 时序两条记录，并注明
   **eNSP 只有「保存拓扑」（主窗口 Ctrl+S）才会把设备配置写回 `.topo` 目录**：
   只做设备 `save` 然后结束进程，重开拓扑仍会回到初始配置。
 
@@ -83,13 +97,13 @@
 
 - **`ensp_cli` 的 `echo_to_window` 从来不提交命令**：回显把每行结尾写成 `\r`，而桥的
   `type_text` 明确跳过 `\r`（只把 `\n` 映射成 VK_RETURN），于是命令被逐字打进设备窗口后
-  一直躺在输入缓冲里，截图只有命令行、没有回显。改成 `\n` 后实测能正常执行并截到完整输出。
+  一直躺在输入缓冲里，截图只有命令行、没有回显。改成 `\n` 后能正常执行并截到完整输出。
 - 回显的默认停顿加大：`echo_gap_ms` 600 → 900，`echo_settle_ms` 1200 → 1800，避免长回显
   还没打印完就截图。
 
 ### Docs
 
-- SKILL 错误目录补两条实测：首条命令超时且 partial output 只有 `##`（设备没就绪，加大
+- SKILL 错误目录补两条：首条命令超时且 partial output 只有 `##`（设备没就绪，加大
   `command_timeout_ms` 重试）、回显截图缺输出（旧版 `\r` 问题）。
 
 ## [0.2.0] - 2026-10-29
