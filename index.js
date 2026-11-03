@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -359,6 +360,16 @@ function matchExpect(output, pattern) {
     }
   }
   return text.toLowerCase().includes(pattern.toLowerCase())
+}
+
+/** md5 of a produced PNG, used to spot "the window never repainted" duplicates. */
+async function fileDigest(path) {
+  try {
+    const data = await readFile(path)
+    return createHash('md5').update(data).digest('hex')
+  } catch (error) {
+    return null
+  }
 }
 
 /**
@@ -853,7 +864,9 @@ function createTools(config, bridge) {
       const list = Array.isArray(args.shots) ? args.shots : []
       if (list.length === 0) throw new Error('shots must contain at least one entry')
       const done = []
+      const seen = new Map()
       for (let index = 0; index < list.length; index += 1) {
+        let duplicateOf = null
         const spec = list[index]
         const device = spec?.device
         if (!device) throw new Error('every shots[] entry needs device')
@@ -892,6 +905,16 @@ function createTools(config, bridge) {
         const failed = result.steps.filter((step) => !step.ok)
         const shot = result.steps.filter((step) => step.op === 'shot' && step.ok).pop()
         if (failed.length > 0) notes.push(`${device}: ${failed.length} 步失败（${failed[0].error}）`)
+        // A window that did not repaint yields a byte-identical PNG. Say so
+        // instead of letting the caller keep shooting the same frozen frame.
+        const fingerprint = await fileDigest(out)
+        const previous = seen.get(device)
+        if (fingerprint && previous && previous.digest === fingerprint) {
+          notes.push(`${device}: 这张截图与上一张「${previous.path}」完全相同——窗口可能没刷新（重开窗口或重新点击再截）。`)
+          duplicateOf = previous.path
+        } else if (fingerprint) {
+          seen.set(device, { digest: fingerprint, path: out })
+        }
         done.push({
           device,
           out,
@@ -900,6 +923,7 @@ function createTools(config, bridge) {
           height: shot?.height,
           commands: commands.length,
           typed: result.steps.filter((step) => step.op === 'safetype' && step.ok).length,
+          duplicateOf: duplicateOf ?? undefined,
         })
       }
       return lossless({ shots: done, notes })
