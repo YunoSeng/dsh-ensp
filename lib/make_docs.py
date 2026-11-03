@@ -166,6 +166,17 @@ def _anchor_key(section):
     return heading.strip()
 
 
+def _picture_index(paragraphs, wanted):
+    """Index of the wanted-th paragraph that already shows a picture (1-based)."""
+    seen = 0
+    for i, paragraph in enumerate(paragraphs):
+        if _has_picture(paragraph):
+            seen += 1
+            if seen == wanted:
+                return i
+    return None
+
+
 def fill_template(template_path, out_path, sections, width_cm=13.5):
     """Copy the teacher's document and drop screenshots into its blank slots."""
     if not os.path.exists(template_path):
@@ -188,6 +199,17 @@ def fill_template(template_path, out_path, sections, width_cm=13.5):
                 continue
             if any(line.startswith(key) for line in lines):
                 index[key] = i
+    # "#pic2" anchors on the 2nd picture of the template: that is how a screenshot
+    # is put right under the reference topology figure, which has no caption line.
+    for key, _images, _width in wanted:
+        if key in index:
+            continue
+        match = re.fullmatch(r"#pic([0-9]+)", key)
+        if not match:
+            continue
+        found = _picture_index(paragraphs, int(match.group(1)))
+        if found is not None:
+            index[key] = found
     missing = [key for key, _i, _w in wanted if key not in index]
     if missing:
         raise SystemExit("template has no paragraph starting with: %s" % ", ".join(missing))
