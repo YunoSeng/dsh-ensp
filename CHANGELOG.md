@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-11-03
+
 ### Fixed
 
 - **控制台空闲超时导致窗口打字丢字符**：设备控制台闲置一段时间会提示
@@ -154,7 +156,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.4...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.5...HEAD
+[0.2.5]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.1...v0.2.2
