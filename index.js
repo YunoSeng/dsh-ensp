@@ -52,6 +52,8 @@ const PROMPT_SECTION = `## eNSP 实验自动化（dsh-ensp）
 3. \`ensp_gui\` 批量步骤——只用于必须点界面的动作（启动/停止设备、打开设备窗口、切换面板）。
 4. 真实鼠标点击（\`click\` 带 \`restore:true\`）是最后手段，用完必须把鼠标还原。
 
+**少回合**：工具本身只花几百毫秒，真正的成本是回合数（每步都要重新想一遍）。一步之内把互不依赖的调用并行发出去——多台设备用 \`ensp_cli {devices:[…]}\`，多张截图用 \`ensp_shot {shots:[…]}\`，配完一次核对、截图最后集中截。步数减半，总时长就减半。
+
 硬性工作规范：
 - 截图前先问用户：是否关闭显示调试信息（\`undo debugging all\`、\`undo terminal monitor\`），避免回显里出现调试日志。
 - 用户提供实训文档时，交付两份文档：一份截图下配一句话说明；一份只在对应题目下贴截图、不写任何说明文字（纯截图版用 \`ensp_doc\` 的 \`template_path\` 以原题目文档为底，**第一个 section 必须是实际拓扑图，插在题目参考拓扑图正下方**，同样不加文字）。
@@ -301,6 +303,146 @@ async function ensureDeviceWindow(bridge, config, devices, title, { offset, sett
 }
 
 // --------------------------------------------------------------- tool factory
+
+/**
+ * Capture one window into a PNG. Shared by the single-shot and batch forms of
+ * ensp_shot so a whole set of screenshots costs one tool call.
+ */
+async function captureWindow(spec, { devices, bridge, config, exec }) {
+  const out = await resolveWorkspacePath(spec.out, exec, config, { kind: 'out' })
+  await prepareOutput(out, spec.allow_overwrite === true, 'out')
+  const target = spec.target ?? 'main'
+  const notes = []
+  const steps = []
+  if (target === 'screen') {
+    steps.push({ op: 'screen', out, crop: spec.crop })
+  } else if (target === 'device') {
+    const title = spec.device ?? ''
+    if (!title) throw new Error('target=device needs device (window title) or hwnd')
+    // A hidden device window only yields a stale bitmap, so make it visible first.
+    const outcome = await ensureDeviceWindow(bridge, config, devices, title, { settle: 1.1 })
+    if (!outcome.open) {
+      if (outcome.needsTopology) {
+        throw new Error(`设备窗口「${title}」当前没有显示，用 ShowWindow 打开会被 eNSP 立刻隐藏。请传 topology_path 让工具走双击图标的路径，或先用 ensp_gui 的 open_console。`)
+      }
+      throw new Error(`设备窗口「${title}」打不开：面板可能不在可见画布内（试过 ${outcome.tried} 个图标位置）。`)
+    }
+    steps.push({ op: 'shot', title, out, crop: spec.crop })
+    notes.push(`设备窗口来源：${outcome.method}。`)
+  } else {
+    steps.push(spec.hwnd
+      ? { op: 'shot', hwnd: spec.hwnd, out, crop: spec.crop }
+      : { op: 'shot', ensp: true, out, crop: spec.crop })
+  }
+  const result = await bridge.steps(steps)
+  const shot = result.steps.filter((step) => step.ok && step.width).pop()
+  if (!shot) {
+    const failure = result.steps.find((step) => !step.ok)
+    throw new Error(`screenshot failed: ${failure?.error ?? 'unknown error'}`)
+  }
+  return { path: out, width: shot.width, height: shot.height, window: shot.window, notes }
+}
+
+/**
+ * Run one command batch against one device. Used by both the single-device and
+ * the devices:[...] form of ensp_cli, so several devices cost one tool call.
+ */
+async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
+  const notes = []
+  const deviceName = entry.device
+  let port = entry.port
+  if (!port) {
+    if (!deviceName || !devices) throw new Error('provide port, or device + topology_path')
+    const device = devices.find((item) => item.name.toLowerCase() === String(deviceName).toLowerCase())
+    if (!device) throw new Error(`device "${deviceName}" is not in the topology`)
+    if (!device.comPort) throw new Error(`device "${deviceName}" has no console port (it never started)`)
+    port = device.comPort
+  }
+  const commands = Array.isArray(entry.commands) ? entry.commands : []
+  const session = new VrpSession({
+    port,
+    username: entry.username,
+    password: entry.password,
+    newPassword: entry.new_password,
+    commandTimeoutMs: entry.command_timeout_ms,
+  })
+  let prompt = ''
+  let results = []
+  let saved
+  try {
+    const opened = await session.open()
+    prompt = opened.prompt
+    const ran = await session.run(commands, { systemView: entry.system_view === true })
+    prompt = ran.prompt
+    results = ran.results
+    const mutating = commands.some((line) => !isReadOnlyCommand(String(line)))
+    const wantSave = entry.save === false ? false : (entry.save === true ? true : mutating)
+    if (wantSave) {
+      const done = await session.save()
+      results = [...results, ...done.results]
+      const last = done.results[done.results.length - 1] ?? {}
+      const ok = /successfully|had been saved|已保存|保存成功/iu.test(last.output ?? '')
+      saved = { performed: true, ok, output: last.output ?? '' }
+      if (!ok) notes.push(`${deviceName}: 保存回显里没有成功字样，请再确认一次（display saved-configuration 或 dir）。`)
+    } else {
+      saved = { performed: false, reason: entry.save === false ? 'disabled-by-args' : 'read-only batch' }
+    }
+  } finally {
+    session.close()
+  }
+
+  let echo
+  let screenshot
+  if (echoArgs && echoArgs.echo_to_window) {
+    if (!deviceName) throw new Error('echo_to_window needs device so the window can be found')
+    if (!echoArgs.allow_cursor_takeover) {
+      notes.push('回显需要打开设备窗口（会短暂接管鼠标并还原）。')
+    }
+    const opened = await ensureDeviceWindow(bridge, config, devices, deviceName, { settle: 1.1 })
+    if (!opened.open) {
+      throw new Error(opened.needsTopology
+        ? `设备窗口「${deviceName}」没有显示：回显需要 topology_path 才能双击图标打开它。`
+        : `设备窗口「${deviceName}」打不开（试过 ${opened.tried} 个图标位置）。`)
+    }
+    // Real keystrokes, guarded: refuse rather than leak them into another app.
+    //
+    // The line must end with "\n": bridge type_text maps "\n" to VK_RETURN and
+    // deliberately skips "\r", so a "\r" terminator types the command but never
+    // submits it — the text then sits in the input buffer and the screenshot
+    // shows no output at all.
+    const steps = []
+    for (const line of commands) {
+      steps.push({ op: 'safetype', title: deviceName, text: `${line}\n`, per_char: 0.02 })
+      steps.push({ op: 'sleep', t: Number(echoArgs.echo_gap_ms ?? 900) / 1000 })
+    }
+    steps.push({ op: 'sleep', t: Number(echoArgs.echo_settle_ms ?? 1800) / 1000 })
+    if (echoArgs.screenshot_out) {
+      const out = await resolveWorkspacePath(echoArgs.screenshot_out, exec, config, { kind: 'screenshot_out' })
+      await prepareOutput(out, true, 'screenshot_out')
+      steps.push({ op: 'shot', title: deviceName, out })
+      screenshot = out
+    }
+    const echoed = await bridge.steps(steps)
+    const failures = echoed.steps.filter((step) => !step.ok)
+    echo = {
+      window: opened.method,
+      typed: echoed.steps.filter((step) => step.op === 'safetype' && step.ok).length,
+      reexecutes: true,
+    }
+    if (failures.length > 0) notes.push(`回显失败 ${failures.length} 步：${failures[0].error}`)
+  }
+
+  let transcript
+  if (entry.output_file) {
+    const out = await resolveWorkspacePath(entry.output_file, exec, config, { kind: 'output_file' })
+    await prepareOutput(out, true, 'output_file')
+    const body = results.map((row) => `### ${row.command}\n${row.output ?? ''}`).join('\n\n')
+    await writeFile(out, `${body}\n`, 'utf8')
+    transcript = out
+  }
+
+  return { device: deviceName, port, prompt, results, echo, screenshot, transcript, saved, notes }
+}
 
 function createTools(config, bridge) {
   const tools = []
@@ -573,13 +715,18 @@ function createTools(config, bridge) {
     name: 'ensp_shot',
     description: 'Screenshot the eNSP main window, a device window, or the whole screen into PNG. Captures through the window DC, so the window may stay behind other windows and unfocused (~15 ms).',
     parameters: {
-      out: { type: 'string', required: true, description: 'Output .png path inside the workspace.' },
+      out: { type: 'string', description: 'Output .png path inside the workspace. May be omitted when shots[] is used.' },
       target: { type: 'string', description: 'main | device | screen; defaults to main.' },
       device: { type: 'string', description: 'Device window title when target=device (e.g. SW1).' },
       hwnd: { type: 'integer', description: 'Explicit window handle instead of a name.' },
       crop: { type: 'array', items: { type: 'integer' }, description: 'Optional [x, y, width, height] crop in image pixels.' },
       topology_path: { type: 'string', description: 'Needed when target=device and that window is not visible yet (it is then opened by double-clicking the device icon).' },
       allow_overwrite: { type: 'boolean', description: 'Replace an existing file; defaults to false.' },
+      shots: {
+        type: 'array',
+        items: { type: 'object', additionalProperties: true },
+        description: 'Capture several windows in ONE call: [{out, target?, device?, hwnd?, crop?}]. Each entry behaves like a single-shot call; the reply lists every file. Use this instead of calling ensp_shot once per screenshot.',
+      },
     },
     output: {
       schema: {
@@ -590,55 +737,33 @@ function createTools(config, bridge) {
           width: { type: 'integer', required: true },
           height: { type: 'integer', required: true },
           window: { type: 'object', additionalProperties: true },
+          shots: { type: 'array', items: { type: 'object', additionalProperties: true } },
           notes: { type: 'array', items: { type: 'string' }, required: true },
         },
       },
       render: (_args, value) => renderJson(value),
     },
     async execute(args, exec) {
-      const out = await resolveWorkspacePath(args.out, exec, config, { kind: 'out' })
-      await prepareOutput(out, args.allow_overwrite === true, 'out')
-      const target = args.target ?? 'main'
-      const notes = []
+      const specs = Array.isArray(args.shots) && args.shots.length > 0
+        ? args.shots
+        : [{ out: args.out, target: args.target, device: args.device, hwnd: args.hwnd, crop: args.crop }]
       let devices = null
-      if (args.topology_path) {
-        const path = await resolveWorkspacePath(args.topology_path, exec, config, { mustExist: true, kind: 'topology_path' })
+      if (args.topology_path || specs.some((spec) => spec?.topology_path)) {
+        const raw = args.topology_path ?? specs.find((spec) => spec?.topology_path)?.topology_path
+        const path = await resolveWorkspacePath(raw, exec, config, { mustExist: true, kind: 'topology_path' })
         devices = (await readTopo(path)).devices
       }
-      const steps = []
-      if (target === 'screen') {
-        steps.push({ op: 'screen', out, crop: args.crop })
-      } else if (target === 'device') {
-        const title = args.device ?? ''
-        if (!title) throw new Error('target=device needs device (window title) or hwnd')
-        // A hidden device window only yields a stale bitmap, so make it visible first.
-        const outcome = await ensureDeviceWindow(bridge, config, devices, title, { settle: 1.1 })
-        if (!outcome.open) {
-          if (outcome.needsTopology) {
-            throw new Error(`设备窗口「${title}」当前没有显示，用 ShowWindow 打开会被 eNSP 立刻隐藏。请传 topology_path 让工具走双击图标的路径，或先用 ensp_gui 的 open_console。`)
-          }
-          throw new Error(`设备窗口「${title}」打不开：面板可能不在可见画布内（试过 ${outcome.tried} 个图标位置）。`)
-        }
-        steps.push({ op: 'shot', title, out, crop: args.crop })
-        notes.push(`设备窗口来源：${outcome.method}。`)
-      } else {
-        steps.push(args.hwnd
-          ? { op: 'shot', hwnd: args.hwnd, out, crop: args.crop }
-          : { op: 'shot', ensp: true, out, crop: args.crop })
+      const captured = []
+      for (const spec of specs) {
+        captured.push(await captureWindow(spec, { devices, bridge, config, exec }))
       }
-      const result = await bridge.steps(steps)
-      const shot = result.steps.filter((step) => step.ok && step.width).pop()
-      if (!shot) {
-        const failure = result.steps.find((step) => !step.ok)
-        throw new Error(`screenshot failed: ${failure?.error ?? 'unknown error'}`)
+      const notes = captured.flatMap((item) => item.notes)
+      const first = captured[0]
+      const payload = { path: first.path, width: first.width, height: first.height, window: first.window, notes }
+      if (captured.length > 1) {
+        payload.shots = captured.map((item) => ({ path: item.path, width: item.width, height: item.height }))
       }
-      return lossless({
-        path: out,
-        width: shot.width,
-        height: shot.height,
-        window: shot.window,
-        notes,
-      })
+      return lossless(payload)
     },
   }))
 
@@ -646,7 +771,12 @@ function createTools(config, bridge) {
     name: 'ensp_cli',
     description: 'Send commands to a started eNSP device over its console telnet port (com_port from the .topo) and return the cleaned transcript. Optionally echo the same commands into the device CLI window and screenshot it, which is what lab reports need.',
     parameters: {
-      commands: { type: 'array', items: { type: 'string' }, required: true, description: 'VRP commands in order, without the trailing newline.' },
+      commands: { type: 'array', items: { type: 'string' }, description: 'VRP commands in order, without the trailing newline. Required unless devices[] is used.' },
+      devices: {
+        type: 'array',
+        items: { type: 'object', additionalProperties: true },
+        description: 'Configure several devices in ONE call: [{device, commands, system_view?, username?, password?, new_password?, save?, output_file?}]. The batches run in parallel, so a 3-device lab costs one tool call instead of three.',
+      },
       device: { type: 'string', description: 'Device name from the topology (resolves the port).' },
       port: { type: 'integer', description: 'Explicit console port; overrides device lookup.' },
       topology_path: { type: 'string', description: '.topo path used to resolve device -> port.' },
@@ -676,6 +806,7 @@ function createTools(config, bridge) {
           screenshot: { type: 'string' },
           transcript: { type: 'string' },
           saved: { type: 'object', additionalProperties: true },
+          devices: { type: 'array', items: { type: 'object', additionalProperties: true } },
           notes: { type: 'array', items: { type: 'string' }, required: true },
         },
       },
@@ -683,107 +814,62 @@ function createTools(config, bridge) {
     },
     async execute(args, exec) {
       const notes = []
-      let port = args.port
-      let deviceName = args.device
-      if (!port) {
-        if (!args.topology_path || !deviceName) throw new Error('provide port, or device + topology_path')
-        const path = await resolveWorkspacePath(args.topology_path, exec, config, { mustExist: true, kind: 'topology_path' })
-        const parsed = await readTopo(path)
-        const device = parsed.devices.find((item) => item.name.toLowerCase() === deviceName.toLowerCase())
-        if (!device) throw new Error(`device "${deviceName}" is not in ${path}`)
-        if (!device.comPort) throw new Error(`device "${deviceName}" has no console port (it never started)`)
-        port = device.comPort
+      const topologyDevices = args.topology_path
+        ? (await readTopo(await resolveWorkspacePath(args.topology_path, exec, config, { mustExist: true, kind: 'topology_path' }))).devices
+        : null
+      const entries = Array.isArray(args.devices) && args.devices.length > 0
+        ? args.devices
+        : [{
+            device: args.device,
+            port: args.port,
+            commands: args.commands,
+            system_view: args.system_view,
+            username: args.username,
+            password: args.password,
+            new_password: args.new_password,
+            command_timeout_ms: args.command_timeout_ms,
+            save: args.save,
+            output_file: args.output_file,
+          }]
+      if (!entries[0].commands && !entries[0].devices) {
+        throw new Error('provide commands (single device) or devices:[{device, commands}]')
       }
-      const session = new VrpSession({
-        port,
-        username: args.username,
-        password: args.password,
-        newPassword: args.new_password,
-        commandTimeoutMs: args.command_timeout_ms,
+      const solo = entries.length === 1
+      const runs = await Promise.all(entries.map(async (entry) => {
+        try {
+          return await runOnDevice(entry, {
+            devices: topologyDevices,
+            exec,
+            config,
+            bridge,
+            echoArgs: solo ? args : null,
+          })
+        } catch (error) {
+          if (solo) throw error
+          // One bad device must not sink the whole batch: report it in place.
+          return {
+            device: entry.device,
+            port: 0,
+            prompt: '',
+            results: [],
+            saved: { performed: false, reason: 'failed' },
+            notes: [`${entry.device}: ${error.message}`],
+            error: error.message,
+          }
+        }
+      }))
+      if (solo) {
+        return lossless({ ...runs[0], notes: [...runs[0].notes, ...notes] })
+      }
+      const allNotes = [...notes, ...runs.flatMap((run) => run.notes)]
+      return lossless({
+        device: runs.map((run) => run.device).join(','),
+        port: runs[0].port,
+        prompt: runs[0].prompt,
+        results: runs.flatMap((run) => (run.results ?? []).map((row) => ({ ...row, device: run.device }))),
+        devices: runs,
+        notes: allNotes,
       })
-      let prompt = ''
-      let results = []
-      let saved
-      try {
-        const opened = await session.open()
-        prompt = opened.prompt
-        const ran = await session.run(args.commands, { systemView: args.system_view === true })
-        prompt = ran.prompt
-        results = ran.results
-        const mutating = args.commands.some((line) => !isReadOnlyCommand(String(line)))
-        const wantSave = args.save === false ? false : (args.save === true ? true : mutating)
-        if (wantSave) {
-          const done = await session.save()
-          results = [...results, ...done.results]
-          const entry = done.results[done.results.length - 1] ?? {}
-          const ok = /successfully|had been saved|已保存|保存成功/iu.test(entry.output ?? '')
-          saved = { performed: true, ok, output: entry.output ?? '' }
-          if (!ok) notes.push('保存配置的回显里没有出现成功字样，请再确认一次（display saved-configuration 或 dir）。')
-        } else {
-          saved = { performed: false, reason: args.save === false ? 'disabled-by-args' : 'read-only batch' }
-        }
-      } finally {
-        session.close()
-      }
-
-      let echo
-      let screenshot
-      if (args.echo_to_window) {
-        if (!deviceName) throw new Error('echo_to_window needs device so the window can be found')
-        if (!args.allow_cursor_takeover) {
-          notes.push('回显需要打开设备窗口（会短暂接管鼠标并还原）。')
-        }
-        let devices = null
-        if (args.topology_path) {
-          const path = await resolveWorkspacePath(args.topology_path, exec, config, { mustExist: true, kind: 'topology_path' })
-          devices = (await readTopo(path)).devices
-        }
-        const opened = await ensureDeviceWindow(bridge, config, devices, deviceName, { settle: 1.1 })
-        if (!opened.open) {
-          throw new Error(opened.needsTopology
-            ? `设备窗口「${deviceName}」没有显示：回显需要 topology_path 才能双击图标打开它。`
-            : `设备窗口「${deviceName}」打不开（试过 ${opened.tried} 个图标位置）。`)
-        }
-        // Real keystrokes, guarded: refuse rather than leak them into another app.
-        //
-        // The line must end with "\n": bridge type_text maps "\n" to VK_RETURN and
-        // deliberately skips "\r", so a "\r" terminator types the command but never
-        // submits it — the text then sits in the input buffer and the screenshot
-        // shows no output at all.
-        const steps = []
-        for (const line of args.commands) {
-          steps.push({ op: 'safetype', title: deviceName, text: `${line}\n`, per_char: 0.02 })
-          steps.push({ op: 'sleep', t: Number(args.echo_gap_ms ?? 900) / 1000 })
-        }
-        steps.push({ op: 'sleep', t: Number(args.echo_settle_ms ?? 1800) / 1000 })
-        if (args.screenshot_out) {
-          const out = await resolveWorkspacePath(args.screenshot_out, exec, config, { kind: 'screenshot_out' })
-          await prepareOutput(out, true, 'screenshot_out')
-          steps.push({ op: 'shot', title: deviceName, out })
-          screenshot = out
-        }
-        const echoed = await bridge.steps(steps)
-        const failures = echoed.steps.filter((step) => !step.ok)
-        echo = {
-          window: opened.method,
-          typed: echoed.steps.filter((step) => step.op === 'safetype' && step.ok).length,
-          reexecutes: true,
-        }
-        if (failures.length > 0) notes.push(`回显失败 ${failures.length} 步：${failures[0].error}`)
-      }
-
-      let transcript
-      if (args.output_file) {
-        const out = await resolveWorkspacePath(args.output_file, exec, config, { kind: 'output_file' })
-        await prepareOutput(out, true, 'output_file')
-        const body = results
-          .map((row) => `### ${row.command}\n${row.output ?? ''}`)
-          .join('\n\n')
-        await writeFile(out, `${body}\n`, 'utf8')
-        transcript = out
-      }
-
-      return lossless({ device: deviceName, port, prompt, results, echo, screenshot, transcript, saved, notes })
     },
   }))
 

@@ -7,6 +7,12 @@
 
 ### Added
 
+- **`ensp_cli` 新增 `devices`**：一次调用配多台设备（`devices:[{device, commands, …}]`），内部并行跑，
+  单台失败只在它那一项回 `error`，不影响其它设备。
+- **`ensp_shot` 新增 `shots`**：一次调用截多张图（`shots:[{out, target?, device?, crop?}]`），
+  适合「一台设备一段回显 + 主窗口 + 全屏」这种成批取证。
+- **SKILL 新增「效率铁律」**：工具只占几分钟，真正的成本是回合数——互不依赖的调用要并行发、
+  多设备一次下发、截图成批、核对以文本为主、要问用户的事一次问完。
 - **内置命令速查 `skills/ensp-automation/reference/commands.md`**：把 VRP 的常用命令固化进插件——
   通用/交换 VLAN/ARP 安全/防火墙基础/安全策略/源 NAT（NAPT、Easy-IP）/目的 NAT 与 NAT Server/双向 NAT/
   路由/验证命令，外加「报错 → 处理」对照表。规则也写进 SKILL §0：**先查表，只有设备真的报错才联网搜，
