@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.2.6] - 2026-11-03
+
 ## [0.2.5] - 2026-11-03
 
 ### Fixed
@@ -18,6 +20,8 @@
 
 ### Added
 
+- **新增 `ensp_capture`**：一次调用完成「开设备窗口 → 打字 → 等回显 → 截图 → 关窗」的整套取证动作，清单式传入 `shots:[{device, commands, out}]`，报告里十几张图可以一条调用出完。
+- **`ensp_cli` 新增 `expect`**：与 `commands` 等长的断言数组，未命中就在 `checks[]` 里标出，并给一个总的 `ok`；不用把整段回显读回来判断。
 - **`ensp_cli` 新增 `devices`**：一次调用配多台设备（`devices:[{device, commands, …}]`），内部并行跑，
   单台失败只在它那一项回 `error`，不影响其它设备。
 - **`ensp_shot` 新增 `shots`**：一次调用截多张图（`shots:[{out, target?, device?, crop?}]`），
@@ -156,7 +160,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.5...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.6...HEAD
+[0.2.6]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.2...v0.2.3

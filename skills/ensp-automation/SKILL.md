@@ -57,7 +57,8 @@ description: 用 dsh-ensp 插件操作华为 eNSP：后台批量 GUI 驱动、te
 | 改设备名、改 PC IP、分配端口 | `ensp_topo action=rename/set-ip/set-ports` | 生成新 .topo，不动 GUI |
 | 跑配置/取回显/保存 | `ensp_cli`（telnet） | 单条命令几十毫秒；改配置会自动 `save` |
 | 启动/停止设备、开设备窗口 | `ensp_gui`（start_all / open_console） | 必须走 GUI |
-| 交付截图 | `ensp_shot` / `ensp_cli echo_to_window` | 窗口 DC 截图，不抢焦点 |
+| 交付截图（开窗+打字+截图+关窗一条龙） | `ensp_capture` | 一次调用出多张，最省回合 |
+| 交付截图（单张 / 特殊裁切） | `ensp_shot` / `ensp_cli echo_to_window` | 窗口 DC 截图，不抢焦点 |
 
 一次 GUI 动作要几百毫秒，一条 telnet 命令只要几十毫秒——**能用 telnet 就别点窗口**。
 
@@ -165,6 +166,38 @@ ensp_gui steps=[
 ensp_cli { "topology_path": "lab/3-1.topo", "device": "SW1",
            "commands": ["display current-configuration"] }
 ```
+
+### 用 expect 让工具判对错（省掉「看一眼再决定」的回合）
+
+`commands` 旁边加一个等长的 `expect` 数组，`expect[i]` 必须出现在 `commands[i]` 的回显里
+（大小写不敏感的子串；写成 `/正则/` 时按正则匹配）。返回值多出 `checks[]` 和 `ok`，
+不需要再把整段回显读进上下文：
+
+```json
+ensp_cli { "topology_path": "lab/3-3.topo", "device": "FW", "save": false,
+           "commands": ["display nat-policy rule all", "display ip routing-table protocol static"],
+           "expect":   ["destination-nat", "2.2.10.10/32"] }
+→ { "ok": false, "checks": [ {"command": "…", "pass": true, "missing": []},
+                             {"command": "…", "pass": false, "missing": ["2.2.10.10/32"]} ] }
+```
+
+配置类命令不写 `expect` 就只返回回显；验证类命令建议都写，`ok` 就是这一批的结论。
+
+### 批量取证：ensp_capture
+
+报告里那些「窗口里一条 display + 一张截图」的图，别再自己 open_console → 打字 → shot → close，
+一条调用交清单即可（每项内部会：开窗 → 激活 → 补回车唤醒 → 逐条打字 → 等回显 → 重新激活 → 截图 → 关窗）：
+
+```json
+ensp_capture { "topology_path": "lab/3-3.topo",
+  "shots": [
+    {"device": "FW", "commands": ["display nat-policy rule all"], "out": "截图/t6/05_fw_nat.png"},
+    {"device": "AR", "commands": ["display ip routing-table protocol static"], "out": "截图/t6/08_ar_route.png"},
+    {"device": "SW", "commands": ["display vlan"], "out": "截图/t6/10_sw_vlan.png"} ] }
+```
+
+一项 1–4 条**短的 display** 最合适（图和回显都要放得下）；`settle_ms` 默认 1600，回显特别长时加到 2500。
+拓扑图本身（画布那个）还是用 `ensp_shot target=main` 截主窗口再裁。
 
 ## 3.5 保存配置（收尾必做）
 

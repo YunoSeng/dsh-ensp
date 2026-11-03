@@ -52,7 +52,7 @@ const PROMPT_SECTION = `## eNSP 实验自动化（dsh-ensp）
 3. \`ensp_gui\` 批量步骤——只用于必须点界面的动作（启动/停止设备、打开设备窗口、切换面板）。
 4. 真实鼠标点击（\`click\` 带 \`restore:true\`）是最后手段，用完必须把鼠标还原。
 
-**少回合**：工具本身只花几百毫秒，真正的成本是回合数（每步都要重新想一遍）。一步之内把互不依赖的调用并行发出去——多台设备用 \`ensp_cli {devices:[…]}\`，多张截图用 \`ensp_shot {shots:[…]}\`，配完一次核对、截图最后集中截。步数减半，总时长就减半。
+**少回合**：工具本身只花几百毫秒，真正的成本是回合数（每步都要重新想一遍）。一步之内把互不依赖的调用并行发出去——多台设备用 \`ensp_cli {devices:[…]}\`，多张截图用 \`ensp_shot {shots:[…]}\`，或用 ensp_capture 一条调用完成「开窗→打字→截图→关窗」；验证用 ensp_cli 的 expect 断言拿 ok，不要把整段回显读回来自己看。步数减半，总时长就减半。
 
 硬性工作规范：
 - 截图前先问用户：是否关闭显示调试信息（\`undo debugging all\`、\`undo terminal monitor\`），避免回显里出现调试日志。
@@ -344,6 +344,24 @@ async function captureWindow(spec, { devices, bridge, config, exec }) {
 }
 
 /**
+ * Evaluate one `expect` pattern against a command's output. A pattern wrapped in
+ * slashes is a regular expression; anything else is a case-insensitive substring,
+ * which is what lab verification actually needs ("2.2.10.10/32", "destination-nat").
+ */
+function matchExpect(output, pattern) {
+  const text = String(output ?? '')
+  const slash = /^\/(.*)\/([a-z]*)$/u.exec(pattern)
+  if (slash) {
+    try {
+      return new RegExp(slash[1], slash[2] || 'i').test(text)
+    } catch (error) {
+      return false
+    }
+  }
+  return text.toLowerCase().includes(pattern.toLowerCase())
+}
+
+/**
  * Run one command batch against one device. Used by both the single-device and
  * the devices:[...] form of ensp_cli, so several devices cost one tool call.
  */
@@ -358,7 +376,13 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
     if (!device.comPort) throw new Error(`device "${deviceName}" has no console port (it never started)`)
     port = device.comPort
   }
-  const commands = Array.isArray(entry.commands) ? entry.commands : []
+  const rawCommands = Array.isArray(entry.commands) ? entry.commands : []
+  const expectList = Array.isArray(entry.expect) ? entry.expect : []
+  const specs = rawCommands.map((item, index) => (typeof item === 'string'
+    ? { cmd: item, expect: expectList[index] || null }
+    : { cmd: String(item?.cmd ?? ''), expect: item?.expect ?? expectList[index] ?? null }))
+    .filter((spec) => spec.cmd.length > 0)
+  const commands = specs.map((spec) => spec.cmd)
   const session = new VrpSession({
     port,
     username: entry.username,
@@ -369,12 +393,24 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
   let prompt = ''
   let results = []
   let saved
+  let checks = []
+  let ok = true
   try {
     const opened = await session.open()
     prompt = opened.prompt
     const ran = await session.run(commands, { systemView: entry.system_view === true })
     prompt = ran.prompt
     results = ran.results
+    checks = []
+    for (let index = 0; index < specs.length; index += 1) {
+      const spec = specs[index]
+      if (!spec.expect) continue
+      const output = results[index]?.output ?? ''
+      const patterns = Array.isArray(spec.expect) ? spec.expect : [spec.expect]
+      const missing = patterns.filter((pattern) => !matchExpect(output, String(pattern)))
+      checks.push({ command: spec.cmd, pass: missing.length === 0, missing })
+    }
+    ok = checks.every((check) => check.pass)
     const mutating = commands.some((line) => !isReadOnlyCommand(String(line)))
     const wantSave = entry.save === false ? false : (entry.save === true ? true : mutating)
     if (wantSave) {
@@ -453,7 +489,7 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
     transcript = out
   }
 
-  return { device: deviceName, port, prompt, results, echo, screenshot, transcript, saved, notes }
+  return { device: deviceName, port, prompt, results, echo, screenshot, transcript, saved, checks, ok, notes }
 }
 
 function createTools(config, bridge) {
@@ -780,10 +816,96 @@ function createTools(config, bridge) {
   }))
 
   tools.push(defineTool({
+    name: 'ensp_capture',
+    description: 'Capture report screenshots without driving the GUI yourself: for each entry open that device\'s console window, type the commands with real keystrokes (so the transcript is the student-visible one), wait for the output, screenshot the window, then close it. One call replaces the whole open/type/wait/shoot/close dance, which is where most lab time goes.',
+    parameters: {
+      topology_path: { type: 'string', required: true, description: '.topo path used to locate device icons and console ports.' },
+      shots: {
+        type: 'array',
+        required: true,
+        items: { type: 'object', additionalProperties: true },
+        description: '[{device, commands:["display …"], out, settle_ms?, gap_ms?, keep_open?}]. Commands are typed into the window so they run again; keep each entry to 1–4 short display commands so the screenshot fits.',
+      },
+      allow_overwrite: { type: 'boolean', description: 'Replace existing PNGs; defaults to true here.' },
+      allow_cursor_takeover: { type: 'boolean', description: 'Acknowledge that opening windows uses real clicks; the pointer is restored afterwards.' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          shots: { type: 'array', items: { type: 'object', additionalProperties: true }, required: true },
+          notes: { type: 'array', items: { type: 'string' }, required: true },
+        },
+      },
+      render: (_args, value) => renderJson(value),
+    },
+    async execute(args, exec) {
+      const notes = []
+      const path = await resolveWorkspacePath(args.topology_path, exec, config, { mustExist: true, kind: 'topology_path' })
+      const devices = (await readTopo(path)).devices
+      const list = Array.isArray(args.shots) ? args.shots : []
+      if (list.length === 0) throw new Error('shots must contain at least one entry')
+      const done = []
+      for (const spec of list) {
+        const device = spec?.device
+        if (!device) throw new Error('every shots[] entry needs device')
+        const out = await resolveWorkspacePath(spec.out, exec, config, { kind: 'out' })
+        await prepareOutput(out, args.allow_overwrite !== false, 'out')
+        const opened = await ensureDeviceWindow(bridge, config, devices, device, { settle: 1.2 })
+        if (!opened.open) {
+          notes.push(`${device}: 窗口打不开（${opened.needsTopology ? '需要 topology_path' : '图标不在可见画布内'}）`)
+          done.push({ device, out, ok: false })
+          continue
+        }
+        const commands = (Array.isArray(spec.commands) ? spec.commands : []).map(String)
+        const gap = Number(spec.gap_ms ?? 900) / 1000
+        const settle = Number(spec.settle_ms ?? 1600) / 1000
+        // Activate + a bare Enter first: an idle console has logged out and the
+        // first keystroke only wakes it.
+        const steps = [
+          { op: 'activate', title: device },
+          { op: 'safetype', title: device, text: '\n', per_char: 0.02 },
+          { op: 'sleep', t: 0.5 },
+        ]
+        for (const command of commands) {
+          steps.push({ op: 'safetype', title: device, text: `${command}\n`, per_char: 0.05 })
+          steps.push({ op: 'sleep', t: gap })
+        }
+        steps.push({ op: 'sleep', t: settle })
+        // Re-activate right before the shot: an occluded console keeps a stale DC.
+        steps.push({ op: 'activate', title: device })
+        steps.push({ op: 'sleep', t: 0.2 })
+        steps.push({ op: 'shot', title: device, out })
+        if (spec.keep_open !== true) steps.push({ op: 'close', title: device })
+        const result = await bridge.steps(steps)
+        const failed = result.steps.filter((step) => !step.ok)
+        const shot = result.steps.filter((step) => step.op === 'shot' && step.ok).pop()
+        if (failed.length > 0) notes.push(`${device}: ${failed.length} 步失败（${failed[0].error}）`)
+        done.push({
+          device,
+          out,
+          ok: Boolean(shot),
+          width: shot?.width,
+          height: shot?.height,
+          commands: commands.length,
+          typed: result.steps.filter((step) => step.op === 'safetype' && step.ok).length,
+        })
+      }
+      return lossless({ shots: done, notes })
+    },
+  }))
+
+  tools.push(defineTool({
     name: 'ensp_cli',
     description: 'Send commands to a started eNSP device over its console telnet port (com_port from the .topo) and return the cleaned transcript. Optionally echo the same commands into the device CLI window and screenshot it, which is what lab reports need.',
     parameters: {
       commands: { type: 'array', items: { type: 'string' }, description: 'VRP commands in order, without the trailing newline. Required unless devices[] is used.' },
+      expect: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional assertions, index-aligned with commands: expect[i] must appear in commands[i]\'s output (case-insensitive substring; write /regex/ for a pattern). The reply carries checks[] per asserted command plus one ok flag, so you do not have to eyeball the transcript.',
+      },
       devices: {
         type: 'array',
         items: { type: 'object', additionalProperties: true },
@@ -818,6 +940,8 @@ function createTools(config, bridge) {
           screenshot: { type: 'string' },
           transcript: { type: 'string' },
           saved: { type: 'object', additionalProperties: true },
+          checks: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          ok: { type: 'boolean' },
           devices: { type: 'array', items: { type: 'object', additionalProperties: true } },
           notes: { type: 'array', items: { type: 'string' }, required: true },
         },
@@ -835,6 +959,7 @@ function createTools(config, bridge) {
             device: args.device,
             port: args.port,
             commands: args.commands,
+            expect: args.expect,
             system_view: args.system_view,
             username: args.username,
             password: args.password,
