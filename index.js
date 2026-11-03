@@ -410,15 +410,27 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
     // deliberately skips "\r", so a "\r" terminator types the command but never
     // submits it — the text then sits in the input buffer and the screenshot
     // shows no output at all.
-    const steps = []
+    // A device console that idled for a while logs out and shows
+    // "press any key to log on" — the first keystroke only wakes it. Activate the
+    // window and send a bare Enter first, otherwise the first command is eaten.
+    const steps = [
+      { op: 'activate', title: deviceName },
+      { op: 'safetype', title: deviceName, text: '\n', per_char: 0.02 },
+      { op: 'sleep', t: 0.5 },
+    ]
     for (const line of commands) {
-      steps.push({ op: 'safetype', title: deviceName, text: `${line}\n`, per_char: 0.02 })
+      // 0.02 s/char drops the odd space on slower consoles (AR); 0.05 is safe.
+      steps.push({ op: 'safetype', title: deviceName, text: `${line}\n`, per_char: 0.05 })
       steps.push({ op: 'sleep', t: Number(echoArgs.echo_gap_ms ?? 900) / 1000 })
     }
     steps.push({ op: 'sleep', t: Number(echoArgs.echo_settle_ms ?? 1800) / 1000 })
     if (echoArgs.screenshot_out) {
       const out = await resolveWorkspacePath(echoArgs.screenshot_out, exec, config, { kind: 'screenshot_out' })
       await prepareOutput(out, true, 'screenshot_out')
+      // Re-activate right before the capture: an occluded console window keeps a
+      // stale device context and the PNG then shows the previous screen.
+      steps.push({ op: 'activate', title: deviceName })
+      steps.push({ op: 'sleep', t: 0.2 })
       steps.push({ op: 'shot', title: deviceName, out })
       screenshot = out
     }

@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **控制台空闲超时导致窗口打字丢字符**：设备控制台闲置一段时间会提示
+  `Configuration console time out, please press any key to log on`，第一个按键只用于唤醒。
+  `ensp_cli` 的 `open()` 现在会识别这句提示并补一个回车；`echo_to_window` 也会先激活窗口、
+  发一个空回车再开始打字，同时把逐字符间隔从 0.02 s 提到 0.05 s（0.02 s 时 AR 控制台会丢空格）。
+- **设备窗口截图拿到旧画面**：窗口被遮挡或不在前台时，窗口 DC 不重绘，`BitBlt` 返回上一屏。
+  截图前统一 `RedrawWindow(+RDW_UPDATENOW)` + `UpdateWindow`，`echo_to_window` 还在截图前重新激活窗口。
+
 ### Added
 
 - **`ensp_cli` 新增 `devices`**：一次调用配多台设备（`devices:[{device, commands, …}]`），内部并行跑，

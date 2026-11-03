@@ -268,6 +268,10 @@ Get-ChildItem $dir.FullName -Recurse -File | ForEach-Object { "{0:yyyy-MM-dd HH:
 | `console authentication failed for user "admin"` | 口令不对，或改密流程没走完（答 `N` 会被踢回 `Login authentication`） | 先试出厂 `Admin@123`；设备要求改密时传 `new_password`（工具会走 Y→旧→新→确认） |
 | USG6000V 登录卡在 `The password needs to be changed. Change now? [Y/N]:` | 出厂口令首次登录强制改密 | `ensp_cli` 传 `username`/`password`/`new_password`，例如 `admin` + `Admin@123` → `Huawei@123` |
 | 重开 `.topo` 后配置全没了 | 只做了设备 `save`，**没保存拓扑**；eNSP 只在 Ctrl+S 时把设备 flash 写回拓扑目录 | 收尾按主窗口 **Ctrl+S**，再用 `vrpcfg.cfg`/`flash.efz` 的大小和时间戳确认 |
+| 设备窗口截图是旧画面（不刷新） | 窗口被遮挡/不在前台时，窗口 DC 不重绘，BitBlt 拿到上一屏 | 工具已在截图前 `RedrawWindow`+`UpdateWindow`；仍不行就先 `activate` 该窗口再截 |
+| telnet 能用但窗口打字乱码/丢字符 | 控制台空闲超时（`Configuration console time out, please press any key to log on`），第一个按键被吃掉；或打字太快 | 工具已自动先发一个回车唤醒；`echo_to_window` 的 `per_char` 已提到 0.05 |
+| 重置拓扑文件夹后设备配置还在 | eNSP 的设备状态保存在设备镜像里，重新解压 .zip 不等于复位 | 真复位要在设备上 `reset saved-configuration` 再 `reboot`；否则先 `display current-configuration` 核对残留 |
+| 会话表查不到刚做的 HTTP 访问 | HTTP 会话读完响应很快就拆，查询有个时间窗 | 触发访问后 0.3 s 内查；或连查 2–3 次 / 用 `display firewall session table verbose` |
 | 停设备后配置全丢 | 重启会从 `vrpcfg.cfg` 重新加载，RAM 里没 `save` 的改动全丢 | 停设备**之前**先 `save`；`ensp_cli` 改配置时会自动保存 |
 
 

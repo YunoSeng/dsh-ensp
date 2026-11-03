@@ -358,6 +358,18 @@ def capture(hwnd, out_path, crop=None, mode="blit"):
     width, height = rect[2] - rect[0], rect[3] - rect[1]
     if width <= 0 or height <= 0:
         raise RuntimeError("window has no area: %r" % (rect,))
+    # A window that is covered or was never foreground keeps a stale device
+    # context, and BitBlt then returns the previous screen. Ask it to repaint
+    # first; for eNSP consoles this is the difference between a fresh transcript
+    # and a frozen one.
+    try:
+        win32gui.RedrawWindow(hwnd, None, None,
+                             win32con.RDW_INVALIDATE | win32con.RDW_ALLCHILDREN
+                             | win32con.RDW_UPDATENOW | win32con.RDW_FRAME)
+        win32gui.UpdateWindow(hwnd)
+    except Exception:
+        pass
+    time.sleep(0.03)
     hdc = win32gui.GetWindowDC(hwnd)
     src = None
     mem = None
