@@ -173,7 +173,7 @@ display current-configuration | include nat     # 兜底：直接看配置 ✅
 | USG6000V | `admin` / `Admin@123` | 出厂值；首次登录可能强制改密 |
 | 改过密的 USG | `admin` / `Huawei@123` | 只在这类机器上验过 |
 
-规则：**只用题目/用户给的口令**，不通就换另一个给定值或问用户，不要试 `Admin@1234` 这类变体。
+规则：**只用题目/用户给的口令**。不确定就一次传候选列表 `ensp_cli {"passwords":["Admin@123","Huawei@123"], …}`，工具按顺序重试并回报哪个通了；不要试 `Admin@1234` 这类自造变体。
 
 ## 9. 报错 → 处理
 

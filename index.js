@@ -387,6 +387,7 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
     port,
     username: entry.username,
     password: entry.password,
+    passwords: entry.passwords,
     newPassword: entry.new_password,
     commandTimeoutMs: entry.command_timeout_ms,
   })
@@ -926,6 +927,11 @@ function createTools(config, bridge) {
       system_view: { type: 'boolean', description: 'Enter system-view first; defaults to false.' },
       username: { type: 'string', description: 'Username when the console asks for AAA login.' },
       password: { type: 'string', description: 'Password when the console asks for AAA login.' },
+      passwords: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Candidates tried in order when password is unknown or was changed before (e.g. ["Admin@123","Huawei@123"]). Only use passwords the user or the task actually gave — never invent variants.',
+      },
       new_password: { type: 'string', description: 'New password to set when the device forces a password change on first login (a USG that still has the factory password asks this). Omit to decline the change.' },
       command_timeout_ms: { type: 'integer', description: 'Per-command timeout; defaults to 20000.' },
       echo_to_window: { type: 'boolean', description: 'Open the device console window and type the same commands there with real keystrokes (they execute a second time) so the window can be screenshotted the way a student would see it.' },
@@ -972,6 +978,7 @@ function createTools(config, bridge) {
             system_view: args.system_view,
             username: args.username,
             password: args.password,
+            passwords: args.passwords,
             new_password: args.new_password,
             command_timeout_ms: args.command_timeout_ms,
             save: args.save,
