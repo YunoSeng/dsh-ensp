@@ -5,6 +5,8 @@
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-11-03
+
 ### Added
 
 - **模板模式支持 `anchor: "#picN"`**：按「模板里第 N 张图所在的段落」定位，用于把实际拓扑图
@@ -123,7 +125,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.3...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.4...HEAD
+[0.2.4]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.3...v0.2.4
 [0.2.3]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.2...v0.2.3
 [0.2.2]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.0...v0.2.1
