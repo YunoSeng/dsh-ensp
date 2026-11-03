@@ -89,7 +89,7 @@ AI 操控 eNSP 最慢、最容易翻车的环节是**点鼠标**：真实点击�
      -Target "E:\dsh-plugins\dsh-ensp"
    ```
 
-3. 重启 DSH。技能目录里会出现 `ensp-automation`，工具列表里会出现 `ensp_*` 六个工具。
+3. 重启 DSH。技能目录里会出现 `ensp-automation`，工具列表里会出现 `ensp_*` 七个工具。
 
 4. 验证：让 AI 调一次 `ensp_status`，返回 `bridge.available: true`、`bridge.elevated: true` 就说明提权桥通了。
 
@@ -103,8 +103,9 @@ AI 操控 eNSP 最慢、最容易翻车的环节是**点鼠标**：真实点击�
 | --- | --- | --- |
 | `ensp_status` | 开工前探明现状：桥是否可用/已提权、已打开的 eNSP 实例与窗口、本机装了哪些版本、已打开的设备窗口、`.topo` 里的设备与标注、控制台端口是否已开放 | 0.4–1 s |
 | `ensp_gui` | 把一整套界面动作塞进一次调用：`start_all` / `stop_all` / `open_console` / `close_console` + 全部底层 op（点击、拖拽、滚轮、打字、按键、截图、读控件） | 0.3 s + 15–90 ms/步 |
-| `ensp_shot` | 截图：`main`（主窗口）/ `device`（设备命令行窗口）/ `screen`（整屏），窗口 DC 位图 | 74 ms / 0.7–4.6 s |
-| `ensp_cli` | telnet 下发 VRP 命令，自动处理分屏、提示符、AAA 登录、`save` 确认；可选把同样命令用**真实键盘**回显到设备窗口并截图 | 60 ms（+截图 3 s） |
+| `ensp_shot` | 截图：`main`（主窗口）/ `device`（设备命令行窗口）/ `screen`（整屏），窗口 DC 位图；支持 `shots` 一次截多张 | 74 ms / 0.7–4.6 s |
+| `ensp_capture` | 取证一条龙：按清单 `[{device, commands, out}]` 自动开窗 → 打字 → 等回显 → 截图 → 关窗，一次调用出多张报告图；同一设备的相邻截图完全相同会提示「窗口没刷新」 | 约 5–25 s/台 |
+| `ensp_cli` | telnet 下发 VRP 命令，自动处理分屏、提示符、AAA 登录（可传候选口令列表 `passwords`）、`save` 确认；支持 `devices` 一次配多台、`expect` 断言拿 `ok`、`output_file` 落盘全文、`echo_to_window` 用真实键盘回显并截图 | 60 ms（+截图 3 s） |
 | `ensp_topo` | 纯文件操作：列设备、改设备名、改 PC/Server IP、重排控制台端口（永不原地改源文件） | 1–5 ms |
 | `ensp_doc` | 从截图清单一次生成两份 docx：说明版（每图一句话 + 账号表）、纯截图版 | 1–1.5 s |
 
@@ -113,8 +114,8 @@ AI 操控 eNSP 最慢、最容易翻车的环节是**点鼠标**：真实点击�
 ### 分层通道：能用轻的就不用重的
 
 ```
-ensp_topo（读文件） < ensp_cli（telnet） < ensp_shot（窗口 DC） < ensp_gui（消息投递） < ensp_gui（真实点击）
-     1 ms              60 ms/条             74 ms            ~20 ms/步            ~50 ms/步 + 抢前台
+ensp_topo（读文件） < ensp_cli（telnet） < ensp_shot / ensp_capture（窗口 DC） < ensp_gui（消息投递） < ensp_gui（真实点击）
+     1 ms              60 ms/条             74 ms ~ 5–25 s/台             ~20 ms/步            ~50 ms/步 + 抢前台
 ```
 
 模型被要求在不需要界面的时候**绝不碰界面**。
@@ -123,7 +124,7 @@ ensp_topo（读文件） < ensp_cli（telnet） < ensp_shot（窗口 DC） < ens
 
 ## 作为 MCP 服务器使用
 
-除了 DSH 插件，仓库还带一个 **MCP（Model Context Protocol）服务器**，把同一套六个工具暴露给 Claude Desktop、Claude Code、Cursor、Trae、Cline 等任何支持 MCP 的客户端。
+除了 DSH 插件，仓库还带一个 **MCP（Model Context Protocol）服务器**，把同一套七个工具暴露给 Claude Desktop、Claude Code、Cursor、Trae、Cline 等任何支持 MCP 的客户端。
 
 关键点是**不复制代码**：`mcp/server.js` 调 `apply()` 用替身上下文注册工具，拿到的就是 DSH 插件用的同一批工具对象（同名、同 schema、同 handler），所以两边行为不可能漂移。传输层是手写的 stdio JSON-RPC（`mcp/protocol.js`），**整个插件零运行时依赖**。
 
@@ -243,7 +244,7 @@ npm test        # 24 项断言：协议握手、schema 映射、拓扑解析、�
 ## 目录结构
 
 ```
-index.js                  插件入口：6 个工具、1 个技能、1 段系统提示
+index.js                  主入口：7 个工具、1 个技能、1 段系统提示
 cordis.patch.yml          bundle 清单（DSH 按它加载）
 lib/bridge.py             提权 GUI 桥（唯一的 win32 调用方，约 1200 行）
 lib/launch.py             ShellExecuteW("runas") 拉起 bridge.py
@@ -251,7 +252,7 @@ lib/bridge-client.js      桥的客户端：探测 Python、临时文件 / TCP �
 lib/cli.js                telnet 会话：提示符、分屏、AAA 登录、save 确认
 lib/topo.js               .topo 解析/改写、改名建议
 lib/make_docs.py          两份 docx 的排版（python-docx）
-skills/ensp-automation/   实测操作手册（模型读的 SKILL.md）
+skills/ensp-automation/   实验操作手册（SKILL.md + reference/commands.md 命令速查）
 locale/{zh,en}.json       插件显示名
 mcp/server.js             MCP 前端：复用 apply() 注册的工具，映射 JSON Schema
 mcp/protocol.js           手写的 stdio JSON-RPC 传输（零依赖）
