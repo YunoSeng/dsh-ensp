@@ -5,12 +5,16 @@
 
 ## [Unreleased]
 
+## [0.2.7] - 2026-11-03
+
 ## [0.2.6] - 2026-11-03
 
 ## [0.2.5] - 2026-11-03
 
 ### Fixed
 
+- **`ensp_capture` 会反复弹同一个设备的窗口**：清单里同一设备出现多次时，中间那次不再关窗。
+- **登录失败提示口令来源**：口令错误时错误信息直接写明「只用题目或用户给的口令，不要猜变体」，SKILL 与命令速查也补了口令表。
 - **控制台空闲超时导致窗口打字丢字符**：设备控制台闲置一段时间会提示
   `Configuration console time out, please press any key to log on`，第一个按键只用于唤醒。
   `ensp_cli` 的 `open()` 现在会识别这句提示并补一个回车；`echo_to_window` 也会先激活窗口、
@@ -160,7 +164,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.6...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.7...HEAD
+[0.2.7]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.5...v0.2.6
 [0.2.5]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.4...v0.2.5
 [0.2.4]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.3...v0.2.4

@@ -396,7 +396,12 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
   let checks = []
   let ok = true
   try {
-    const opened = await session.open()
+    const opened = await session.open().catch((error) => {
+      if (/authentication failed|wrong password/iu.test(error.message)) {
+        throw new Error(`${error.message}｜口令只用题目或用户给出的值（常见 admin/Admin@123，改过密的机器是 Huawei@123），不要猜变体；也可以先查 工作区\笔记 里的历史配置，或直接问用户。`)
+      }
+      throw error
+    })
     prompt = opened.prompt
     const ran = await session.run(commands, { systemView: entry.system_view === true })
     prompt = ran.prompt
@@ -847,7 +852,8 @@ function createTools(config, bridge) {
       const list = Array.isArray(args.shots) ? args.shots : []
       if (list.length === 0) throw new Error('shots must contain at least one entry')
       const done = []
-      for (const spec of list) {
+      for (let index = 0; index < list.length; index += 1) {
+        const spec = list[index]
         const device = spec?.device
         if (!device) throw new Error('every shots[] entry needs device')
         const out = await resolveWorkspacePath(spec.out, exec, config, { kind: 'out' })
@@ -877,7 +883,10 @@ function createTools(config, bridge) {
         steps.push({ op: 'activate', title: device })
         steps.push({ op: 'sleep', t: 0.2 })
         steps.push({ op: 'shot', title: device, out })
-        if (spec.keep_open !== true) steps.push({ op: 'close', title: device })
+        // Keep the window when the same device shows up again later in the list
+        // (otherwise the user sees the same window pop open several times).
+        const reused = list.slice(index + 1).some((rest) => rest?.device === device)
+        if (spec.keep_open !== true && !reused) steps.push({ op: 'close', title: device })
         const result = await bridge.steps(steps)
         const failed = result.steps.filter((step) => !step.ok)
         const shot = result.steps.filter((step) => step.op === 'shot' && step.ok).pop()

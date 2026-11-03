@@ -166,6 +166,15 @@ display firewall server-map              # 目的 NAT 表项 📘
 display current-configuration | include nat     # 兜底：直接看配置 ✅
 ```
 
+## 口令（别猜）
+
+| 设备 | 常见口令 | 说明 |
+| --- | --- | --- |
+| USG6000V | `admin` / `Admin@123` | 出厂值；首次登录可能强制改密 |
+| 改过密的 USG | `admin` / `Huawei@123` | 只在这类机器上验过 |
+
+规则：**只用题目/用户给的口令**，不通就换另一个给定值或问用户，不要试 `Admin@1234` 这类变体。
+
 ## 9. 报错 → 处理
 
 | 回显 | 含义 | 处理 |
