@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-10
+
+### Fixed
+
+- **`ensp_cli` 的 `expect` 被写成嵌套数组时直接报参数错误**：现在接受 `expect: [["a","b"], "c"]`，
+  数组内所有条件都要满足，不再浪费一轮。
+- **`ensp_shot` 只给 `device` 不给 `target` 时报「needs device」**：现在自动按 `target:"device"` 处理，
+  并对同一设备的相邻截图做重复帧检测（和 `ensp_capture` 一致）。
+
 ## [0.3.0] - 2026-11-09
 
 ### Added
@@ -210,7 +219,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.7...v0.2.8

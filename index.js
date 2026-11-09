@@ -473,7 +473,9 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
       const spec = specs[index]
       if (!spec.expect) continue
       const output = results[index]?.output ?? ''
-      const patterns = Array.isArray(spec.expect) ? spec.expect : [spec.expect]
+      const patterns = (Array.isArray(spec.expect) ? spec.expect : [spec.expect])
+        .flat()
+        .filter((item) => item !== null && item !== undefined && String(item).length > 0)
       const missing = patterns.filter((pattern) => !matchExpect(output, String(pattern)))
       checks.push({ command: spec.cmd, pass: missing.length === 0, missing })
     }
@@ -903,7 +905,15 @@ function createTools(config, bridge) {
     async execute(args, exec) {
       const specs = Array.isArray(args.shots) && args.shots.length > 0
         ? args.shots
-        : [{ out: args.out, target: args.target, device: args.device, hwnd: args.hwnd, crop: args.crop }]
+        : [{
+            out: args.out,
+            // A bare device name means "shoot that window"; agents write it that way
+            // instead of target:"device" all the time.
+            target: args.target ?? (args.device ? 'device' : undefined),
+            device: args.device,
+            hwnd: args.hwnd,
+            crop: args.crop,
+          }]
       let devices = null
       if (args.topology_path || specs.some((spec) => spec?.topology_path)) {
         const raw = args.topology_path ?? specs.find((spec) => spec?.topology_path)?.topology_path
@@ -911,8 +921,19 @@ function createTools(config, bridge) {
         devices = (await readTopo(path)).devices
       }
       const captured = []
+      const seen = new Map()
       for (const spec of specs) {
-        captured.push(await captureWindow(spec, { devices, bridge, config, exec }))
+        const item = await captureWindow(spec, { devices, bridge, config, exec })
+        const key = spec.device ?? spec.hwnd ?? spec.target ?? 'main'
+        const digest = await fileDigest(item.path)
+        const previous = seen.get(key)
+        if (digest && previous && previous.digest === digest) {
+          item.notes.push(`${key}: 这张与前一张「${previous.path}」完全相同，窗口可能没刷新。`)
+          item.duplicateOf = previous.path
+        } else if (digest) {
+          seen.set(key, { digest, path: item.path })
+        }
+        captured.push(item)
       }
       const notes = captured.flatMap((item) => item.notes)
       const first = captured[0]
@@ -1066,8 +1087,7 @@ function createTools(config, bridge) {
       commands: { type: 'array', items: { type: 'string' }, description: 'VRP commands in order, without the trailing newline. Required unless devices[] is used.' },
       expect: {
         type: 'array',
-        items: { type: 'string' },
-        description: 'Optional assertions, index-aligned with commands: expect[i] must appear in commands[i]\'s output (case-insensitive substring; write /regex/ for a pattern). The reply carries checks[] per asserted command plus one ok flag, so you do not have to eyeball the transcript.',
+        description: 'Optional assertions, index-aligned with commands: expect[i] must appear in commands[i]\'s output (a value may be one pattern or an array of patterns that must all match; case-insensitive substring, write /regex/ for a pattern). The reply carries checks[] per asserted command plus one ok flag, so you do not have to eyeball the transcript.',
       },
       devices: {
         type: 'array',
