@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+## [0.2.9] - 2026-11-09
+
+### Added
+
+- **`ensp_capture` 支持 `expect`**：条目里给断言数组，工具先用 telnet 跑一遍核对，
+  不过就不截图（返回 `skipped: true` 与缺失项），省掉「拍完再看一眼」的回合。
+- **`ensp_doc` 自带结构校验**：生成后直接比对模板与成品的段数/非空段/图片数，返回 `verification`
+  （`textUnchanged` 为 false 时说明纯截图版正文被改动）；不必再自己写脚本数。
+- **`ensp_doc` 模板路径模糊匹配**：中文文件名多一个空格、全角括号也能匹配上，返回 `notes` 说明匹配结果。
+- **`ensp_doc` 自动清理过程截图**：`clean_probe`（默认 true）删除成品图目录里 `_` 开头的调试图片。
+
 ## [0.2.8] - 2026-11-03
 
 ### Added
@@ -183,7 +194,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.8...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.9...HEAD
+[0.2.9]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.6...v0.2.7
 [0.2.6]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.5...v0.2.6

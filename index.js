@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
-import { mkdir, mkdtemp, readdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -360,6 +360,50 @@ function matchExpect(output, pattern) {
     }
   }
   return text.toLowerCase().includes(pattern.toLowerCase())
+}
+
+/**
+ * Resolve the teacher's .docx. Chinese file names drift by a space or a full-width
+ * bracket all the time, and a hard "missing template" error costs a whole retry
+ * round trip, so fall back to the closest name in the same folder.
+ */
+async function resolveTemplatePath(rawPath, exec, config, notes) {
+  try {
+    return await resolveWorkspacePath(rawPath, exec, config, { mustExist: true, kind: 'template_path' })
+  } catch (error) {
+    let full
+    try {
+      full = await resolveWorkspacePath(rawPath, exec, config, { kind: 'template_path' })
+    } catch (inner) {
+      throw error
+    }
+    const normalize = (value) => value.replace(/[\s\u3000_\-()（）·]/gu, '').toLowerCase()
+    const folder = dirname(full)
+    const target = normalize(basename(full).replace(/\.docx$/iu, ''))
+    let entries = []
+    try {
+      entries = await readdir(folder, { withFileTypes: true })
+    } catch (inner) {
+      throw error
+    }
+    const scored = []
+    for (const entry of entries) {
+      if (!entry.isFile() || !/\.docx$/iu.test(entry.name)) continue
+      const name = normalize(entry.name.replace(/\.docx$/iu, ''))
+      let score = 0
+      const limit = Math.min(name.length, target.length)
+      while (score < limit && name[score] === target[score]) score += 1
+      scored.push({ path: join(folder, entry.name), score, length: name.length })
+    }
+    scored.sort((a, b) => (b.score - a.score)
+      || (Math.abs(a.length - target.length) - Math.abs(b.length - target.length)))
+    const best = scored[0]
+    if (best && best.score >= Math.max(6, Math.floor(target.length * 0.8))) {
+      notes.push(`template_path 没找到，按名字近似匹配到「${basename(best.path)}」。`)
+      return best.path
+    }
+    throw error
+  }
 }
 
 /** md5 of a produced PNG, used to spot "the window never repainted" duplicates. */
@@ -841,7 +885,7 @@ function createTools(config, bridge) {
         type: 'array',
         required: true,
         items: { type: 'object', additionalProperties: true },
-        description: '[{device, commands:["display …"], out, settle_ms?, gap_ms?, keep_open?}]. Commands are typed into the window so they run again; keep each entry to 1–4 short display commands so the screenshot fits.',
+        description: '[{device, commands:["display …"], out, expect?, settle_ms?, gap_ms?, keep_open?, force?}]. Commands are typed into the window so they run again; keep each entry to 1–4 short display commands so the screenshot fits. When expect is given (index-aligned with commands, same syntax as ensp_cli), the commands are first checked over telnet and the screenshot is skipped unless they pass — that is what keeps you from shooting a screen you would then have to read.',
       },
       allow_overwrite: { type: 'boolean', description: 'Replace existing PNGs; defaults to true here.' },
       allow_cursor_takeover: { type: 'boolean', description: 'Acknowledge that opening windows uses real clicks; the pointer is restored afterwards.' },
@@ -879,6 +923,43 @@ function createTools(config, bridge) {
           continue
         }
         const commands = (Array.isArray(spec.commands) ? spec.commands : []).map(String)
+        const expectList = Array.isArray(spec.expect) ? spec.expect : []
+        if (expectList.length > 0 && spec.force !== true) {
+          const target = devices.find((item) => item.name.toLowerCase() === String(device).toLowerCase())
+          if (!target?.comPort) {
+            notes.push(`${device}: 没有控制台端口，跳过 expect 断言。`)
+          } else {
+            const session = new VrpSession({
+              port: target.comPort,
+              username: spec.username,
+              password: spec.password,
+              passwords: spec.passwords,
+              commandTimeoutMs: spec.command_timeout_ms ?? 30000,
+            })
+            let checks = []
+            try {
+              await session.open()
+              const ran = await session.run(commands)
+              checks = commands.map((command, i) => {
+                const pattern = expectList[i]
+                if (!pattern) return null
+                const output = ran.results[i]?.output ?? ''
+                return { command, pass: matchExpect(output, String(pattern)), pattern }
+              }).filter(Boolean)
+            } catch (error) {
+              notes.push(`${device}: expect 断言阶段登录/下发失败（${error.message}）。`)
+            } finally {
+              session.close()
+            }
+            const failed = checks.filter((check) => !check.pass)
+            if (failed.length > 0) {
+              notes.push(`${device}: 断言未通过（缺 ${failed.map((item) => item.pattern).join(' / ')}），没有截图。`)
+              done.push({ device, out, ok: false, skipped: true, checks })
+              continue
+            }
+            if (checks.length > 0) notes.push(`${device}: ${checks.length} 条断言全部通过。`)
+          }
+        }
         const gap = Number(spec.gap_ms ?? 900) / 1000
         const settle = Number(spec.settle_ms ?? 1600) / 1000
         // Activate + a bare Enter first: an idle console has logged out and the
@@ -1146,6 +1227,8 @@ function createTools(config, bridge) {
       credentials: { type: 'array', items: { type: 'object', additionalProperties: true }, description: 'Password table rows: {item, value}.' },
       notes: { type: 'array', items: { type: 'string' }, description: 'Closing notes (captioned copy only).' },
       file_stem: { type: 'string', description: 'Base file name; defaults to the sanitized title.' },
+      verify: { type: 'boolean', description: 'Compare the bare copy against template_path (paragraphs / non-empty text / pictures) and return verification; defaults to true when template_path is given.' },
+      clean_probe: { type: 'boolean', description: 'Delete leftover _*.png probe screenshots next to the images used (they are never referenced); defaults to true.' },
       allow_overwrite: { type: 'boolean' },
     },
     output: {
@@ -1156,6 +1239,8 @@ function createTools(config, bridge) {
           captioned: { type: 'string' },
           bare: { type: 'string' },
           images: { type: 'integer', required: true },
+          verification: { type: 'object', additionalProperties: true },
+          cleaned: { type: 'array', items: { type: 'string' } },
           notes: { type: 'array', items: { type: 'string' }, required: true },
         },
       },
@@ -1185,7 +1270,7 @@ function createTools(config, bridge) {
       }
       let template = ''
       if (args.template_path) {
-        template = await resolveWorkspacePath(args.template_path, exec, config, { mustExist: true, kind: 'template_path' })
+        template = await resolveTemplatePath(args.template_path, exec, config, notes)
       }
       const manifestBase = {
         title: args.title,
@@ -1209,10 +1294,50 @@ function createTools(config, bridge) {
         if (run.code !== 0) {
           throw new Error(`document build failed (${mode}): ${run.stderr.trim() || run.stdout.trim()}`)
         }
-        built.push(out)
+        let parsed = null
+        try {
+          parsed = JSON.parse(String(run.stdout ?? '').trim().split('\n').pop() ?? 'null')
+        } catch (error) {
+          parsed = null
+        }
+        built.push({ mode, out, result: parsed })
       }
       const images = sections.reduce((sum, section) => sum + (section.images?.length ?? 0), 0)
-      return lossless({ captioned: captionedOut, bare: bareOut, images, notes })
+      const bareRun = built.find((item) => item.mode === 'bare')
+      let verification
+      if (bareRun?.result?.verification) {
+        verification = bareRun.result.verification
+        if (verification.ok === false) {
+          notes.push(`纯截图版与模板不一致：模板 ${verification.template.textParagraphs} 个非空段 / ${verification.template.images} 张图，`
+            + `产出 ${verification.output.textParagraphs} 个非空段 / ${verification.output.images} 张图——正文可能被改动。`)
+        }
+      } else if (template) {
+        notes.push('模板模式没有返回结构校验结果（python-docx 版本可能过旧）。')
+      }
+      const cleaned = []
+      if (args.clean_probe !== false) {
+        const dirs = new Set(sections.flatMap((section) => (section.images ?? []).map((image) => dirname(image.path))))
+        for (const folder of dirs) {
+          let entries = []
+          try {
+            entries = await readdir(folder, { withFileTypes: true })
+          } catch (error) {
+            continue
+          }
+          for (const entry of entries) {
+            if (!entry.isFile() || !entry.name.startsWith('_') || !/\.(png|jpe?g)$/iu.test(entry.name)) continue
+            const full = join(folder, entry.name)
+            try {
+              await rm(full, { force: true })
+              cleaned.push(full)
+            } catch (error) {
+              // best effort only
+            }
+          }
+        }
+        if (cleaned.length > 0) notes.push(`清理了 ${cleaned.length} 张 \`_\` 开头的过程截图。`)
+      }
+      return lossless({ captioned: captionedOut, bare: bareOut, images, verification, cleaned, notes })
     },
   }))
 

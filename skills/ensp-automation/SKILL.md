@@ -201,6 +201,31 @@ ensp_capture { "topology_path": "lab/3-3.topo",
 一项 1–4 条**短的 display** 最合适（图和回显都要放得下）；`settle_ms` 默认 1600，回显特别长时加到 2500。
 拓扑图本身（画布那个）还是用 `ensp_shot target=main` 截主窗口再裁。
 
+**先断言再截图**：条目里加 `expect`（与 `commands` 等长），工具会先用 telnet 跑一遍并核对，
+**断言不过就不截图**，返回 `skipped: true` + 缺什么；这样「拍完再看一眼对不对」的回合就没了：
+
+```json
+ensp_capture { "topology_path": "lab/3-4.topo", "shots": [
+  {"device": "FW", "commands": ["display firewall server-map"],
+   "expect": ["2.2.10.10"], "out": "截图/t7/04_servermap.png"} ] }
+```
+
+## 3.6 ensp_doc 的自检（别自己写脚本数段落）
+
+`ensp_doc` 生成完会自己比对模板和成品，直接返回结构校验，不需要再用 pwsh/python 去数：
+
+```json
+"verification": {
+  "template": {"paragraphs": 49, "textParagraphs": 9, "images": 1},
+  "output":   {"paragraphs": 52, "textParagraphs": 9, "images": 15},
+  "addedImages": 14, "textUnchanged": true, "ok": true }
+```
+
+- `textUnchanged: false` = 纯截图版的正文被改了，必须停下修。
+- `template_path` 找不到时会按名字近似匹配（中文文件名多一个空格、全角括号都能对上），
+  返回的 `notes` 会说明匹配到了哪个文件。
+- `clean_probe`（默认 true）会删掉成品图所在目录里的 `_` 开头过程截图，避免交付目录里一堆废图。
+
 ## 3.5 保存配置（收尾必做）
 
 实测 `save` 的正确姿势：**只能在用户视图**执行（系统视图下会报错），且设备会反问 `Are you sure to continue?[Y/N]`（AR2220 是 `(y/n)[n]:`），必须答 `y`。`ensp_cli` 已经把这套做完：

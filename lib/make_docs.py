@@ -177,6 +177,16 @@ def _picture_index(paragraphs, wanted):
     return None
 
 
+def _doc_stats(path):
+    """Structural fingerprint of a .docx: paragraphs, non-empty paragraphs, pictures."""
+    doc = Document(path)
+    paragraphs = doc.paragraphs
+    pictures = sum(1 for _ in doc.element.body.iter(A_BLIP))
+    return {"paragraphs": len(paragraphs),
+            "textParagraphs": sum(1 for par in paragraphs if par.text.strip()),
+            "images": pictures}
+
+
 def fill_template(template_path, out_path, sections, width_cm=13.5):
     """Copy the teacher's document and drop screenshots into its blank slots."""
     if not os.path.exists(template_path):
@@ -243,8 +253,19 @@ def fill_template(template_path, out_path, sections, width_cm=13.5):
     if os.path.exists(out_path):
         os.remove(out_path)
     doc.save(out_path)
+    template_stats = _doc_stats(template_path)
+    output_stats = _doc_stats(out_path)
+    verification = {
+        "template": template_stats,
+        "output": output_stats,
+        "addedImages": output_stats["images"] - template_stats["images"],
+        "textUnchanged": template_stats["textParagraphs"] == output_stats["textParagraphs"],
+        "ok": (template_stats["textParagraphs"] == output_stats["textParagraphs"]
+               and output_stats["images"] >= template_stats["images"]),
+    }
     return {"output": out_path, "anchors": len(order),
-            "images": sum(len(images) for _k, _i, images, _w in order)}
+            "images": sum(len(images) for _k, _i, images, _w in order),
+            "verification": verification}
 
 
 def build(manifest, out_path):
