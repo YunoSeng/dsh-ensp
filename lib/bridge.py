@@ -903,6 +903,52 @@ def exeinfo(path):
 
 # ------------------------------------------------------------------ dispatch
 
+
+def _port_owners(ports):
+    """PID(s) holding the given TCP listening ports, via netstat (works elevated)."""
+    wanted = set(int(port) for port in ports)
+    owners = {}
+    try:
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"],
+                             capture_output=True, text=True, errors="ignore").stdout
+    except Exception:
+        return owners
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        local, state, pid = parts[1], parts[3], parts[-1]
+        if ":" not in local:
+            continue
+        try:
+            port = int(local.rsplit(":", 1)[1])
+        except ValueError:
+            continue
+        if port in wanted and state.upper() == "LISTENING":
+            try:
+                owners.setdefault(port, set()).add(int(pid))
+            except ValueError:
+                pass
+    return owners
+
+
+def free_ports(ports, wait=1.0):
+    """Kill whatever still listens on these console ports (stale eNSP daemons)."""
+    killed = []
+    owners = _port_owners(ports)
+    for port, pids in owners.items():
+        for pid in pids:
+            try:
+                rc = subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                    capture_output=True, text=True).returncode
+                killed.append({"port": port, "pid": pid, "rc": rc})
+            except Exception as error:
+                killed.append({"port": port, "pid": pid, "error": str(error)})
+    if wait:
+        time.sleep(float(wait))
+    remaining = sorted(_port_owners(ports).keys())
+    return {"killed": killed, "remaining": remaining}
+
 def dispatch(op, args):
     if op == "ping":
         return {"pong": True, "pid": os.getpid(), "elevated": is_elevated(),
@@ -1092,6 +1138,8 @@ def dispatch(op, args):
                                           args.get("workdir"), args.get("breakaway", True))}
     if op == "kill":
         return {"killed": kill_images(args["names"], args.get("wait", 0.0))}
+    if op == "free_ports":
+        return free_ports(args["ports"], args.get("wait", 1.0))
     if op == "sleep":
         time.sleep(float(args.get("t", 0.5)))
         return {"slept": args.get("t", 0.5)}

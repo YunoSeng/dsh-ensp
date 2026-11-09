@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-09
+
+### Added
+
+- **`ensp_gui` 新增 `wait_ports`**：一次调用等到端口开放/关闭（`{"op":"wait_ports","ports":[2000],"timeout_ms":300000}`），
+  返回等了多久、哪些端口已通，不必再用 `Start-Sleep` 盲等。
+- **`ensp_gui` 新增 `free_ports`**：清掉仍占着控制台端口的残留进程（eNSP 退出后偶尔会留下僵尸监听），
+  返回被杀掉的 pid 和仍占用端口。
+
+### Fixed
+
+- **`start_all` 全都没起来时自动重试**：第一次点启动后若没有任何端口开放，自动重新全选再点一次启动；
+  仍然失败时提示用 `{"op":"kill"}` 重开拓扑。
+- **`ensp_cli` 参数误用更早报错**：`device` 传了 `"FW,AR,SW"` 这种多设备串、或 `port` 传 0 时直接给出
+  正确写法（`devices:[…]`），不再连到奇怪的端口上返回误导性回显。
+
 ## [0.2.9] - 2026-11-09
 
 ### Added
@@ -194,7 +210,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.9...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.8...v0.2.9
 [0.2.8]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.7...v0.2.8
 [0.2.7]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.6...v0.2.7

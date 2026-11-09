@@ -424,8 +424,14 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
   const notes = []
   const deviceName = entry.device
   let port = entry.port
+  if (port !== undefined && port !== null && port !== '' && Number(port) <= 0) {
+    throw new Error(`port 必须是正整数（收到 ${JSON.stringify(port)}）；不指定端口时用 device + topology_path 自动解析。`)
+  }
   if (!port) {
     if (!deviceName || !devices) throw new Error('provide port, or device + topology_path')
+    if (String(deviceName).includes(',') || String(deviceName).includes('，')) {
+      throw new Error(`device 只接受一个设备名（收到“${deviceName}”）；要给多台设备下发，请用 devices:[{device, commands}, …]。`)
+    }
     const device = devices.find((item) => item.name.toLowerCase() === String(deviceName).toLowerCase())
     if (!device) throw new Error(`device "${deviceName}" is not in the topology`)
     if (!device.comPort) throw new Error(`device "${deviceName}" has no console port (it never started)`)
@@ -736,6 +742,28 @@ function createTools(config, bridge) {
           pending.push({ op: 'sleep', t: step.settle ?? 1.0 })
           continue
         }
+        if (op === 'wait_ports') {
+          // Poll console ports instead of making the caller sleep blindly. The USG
+          // boots a full VM and can take minutes, so waiting happens here, once.
+          await flush()
+          const wanted = Array.isArray(step.ports) && step.ports.length > 0
+            ? step.ports.map(Number).filter((port) => port > 0)
+            : (devices ?? []).filter((device) => device.comPort > 0).map((device) => device.comPort)
+          if (wanted.length === 0) throw new Error('wait_ports needs ports[] or a topology_path with console ports')
+          const want = step.want === 'closed' ? 'closed' : 'open'
+          const started = Date.now()
+          const open = await watchPorts(wanted, want, Number(step.timeout_ms ?? 180000))
+          const elapsed = ((Date.now() - started) / 1000).toFixed(1)
+          if (want === 'open') {
+            const missing = wanted.filter((port) => !open.includes(port))
+            notes.push(missing.length === 0
+              ? `等待 ${elapsed} s 后端口全部开放（${open.join(', ')}）。`
+              : `等待 ${elapsed} s，仍未开放的端口：${missing.join(', ')}（已开放 ${open.join(', ') || '无'}）。防火墙/虚拟机启动慢是常态，可加大 timeout_ms 或先做别的。`)
+          } else {
+            notes.push(`等待 ${elapsed} s 后端口全部关闭。`)
+          }
+          continue
+        }
         if (op === 'open_console' || op === 'device_window') {
           if (!devices) throw new Error(`${op} needs topology_path`)
           const target = String(step.device)
@@ -773,7 +801,9 @@ function createTools(config, bridge) {
 
       // Device consoles need several seconds to come up (or go down); poll the
       // console ports so the caller does not have to guess or sleep blindly.
-      const watchPorts = async (ports, want, timeoutMs) => {
+      // Function declaration (not a const arrow) so wait_ports can call it from
+      // inside the step loop, which runs before this point in the source.
+      async function watchPorts(ports, want, timeoutMs) {
         const deadline = Date.now() + timeoutMs
         let open = []
         for (;;) {
@@ -787,12 +817,30 @@ function createTools(config, bridge) {
       if (devices) {
         const ports = devices.filter((device) => device.comPort > 0).map((device) => device.comPort)
         if (startAllRequested && ports.length > 0) {
-          const open = await watchPorts(ports, 'open', args.start_wait_ms ?? 25000)
+          let open = await watchPorts(ports, 'open', args.start_wait_ms ?? 25000)
+          if (open.length === 0) {
+            // Every console dead right after a start click usually means the click
+            // missed (canvas not rendered yet) or the topology was just reopened.
+            // Reselect and press start once more before giving up.
+            notes.push('第一次点启动后没有任何端口打开，自动重新全选并再点一次启动。')
+            await bridge.steps([
+              { op: 'activate', ensp: true },
+              { op: 'click', ensp_rel: [400, 470], restore: true },
+              { op: 'key', key: 'a', mods: ['ctrl'], ensp: true },
+              { op: 'sleep', t: 0.5 },
+              { op: 'click', ensp_rel: [config.toolbarStart[0], config.toolbarStart[1]], restore: true },
+              { op: 'sleep', t: 1.0 },
+            ])
+            open = await watchPorts(ports, 'open', args.start_wait_ms ?? 25000)
+            if (open.length === 0) {
+              notes.push('重试后仍然没有端口打开：建议用 {op:"kill"} 关掉 eNSP 再重新打开该拓扑（已打开的实例状态可能已坏）。')
+            }
+          }
           const missing = ports.filter((port) => !open.includes(port))
           if (missing.length === 0) {
             notes.push(`全部 ${ports.length} 个控制台端口已开放（${open.join(', ')}），可以开始下发命令。`)
           } else {
-            notes.push(`这些控制台端口还没通：${missing.join(', ')}。常见原因：设备还在启动（可再等几秒）、防火墙/USG 起不来、或该设备本来就没有控制台。`)
+            notes.push(`这些控制台端口还没通：${missing.join(', ')}。常见原因：设备还在启动、防火墙/虚拟机起不来，或该设备本来就没有控制台。需要等待时用 {op:"wait_ports"}，不要用 sleep 盲等。`)
           }
         }
         if (stopAllRequested && ports.length > 0) {
