@@ -61,8 +61,8 @@ check('未知协议版本回落到默认值', unknownInit?.result?.protocolVersi
 
 const list = await call({ jsonrpc: '2.0', id: 4, method: 'tools/list' })
 const tools = list?.result?.tools ?? []
-check('列出七个工具', tools.length === 7, tools.map((tool) => tool.name).join(', '))
-check('工具名齐全', ['ensp_status', 'ensp_gui', 'ensp_shot', 'ensp_capture', 'ensp_cli', 'ensp_topo', 'ensp_doc'].every((name) => tools.some((tool) => tool.name === name)))
+check('列出八个工具', tools.length === 8, tools.map((tool) => tool.name).join(', '))
+check('工具名齐全', ['ensp_status', 'ensp_gui', 'ensp_shot', 'ensp_capture', 'ensp_cli', 'ensp_topo', 'ensp_ref', 'ensp_doc'].every((name) => tools.some((tool) => tool.name === name)))
 check('每个工具都有 object inputSchema', tools.every((tool) => tool.inputSchema?.type === 'object' && tool.inputSchema.properties))
 check('每个工具都有描述', tools.every((tool) => typeof tool.description === 'string' && tool.description.length > 20))
 

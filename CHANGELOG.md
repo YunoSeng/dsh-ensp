@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-10
+
+### Added
+
+- **新增 `ensp_ref`（第 8 个工具）**：把题目 `.docx` / 课件 `.pptx` 一次转成工作区里的 `.txt`
+  （按修改时间缓存），返回字符数、行数与开头预览；之后用检索工具查文本，不必反复解析 Office 文件。
+- **命令速查补「8.5 双机热备（HRP + VRRP）」**：`hrp enable`、`hrp interface … remote`、
+  `hrp track interface`、`hrp preempt delay`、`hrp mirror session enable`、`hrp priority`，
+  VRRP 分组 active-standby 实现负载分担，以及 `display hrp state` / `display vrrp brief` /
+  `display ospf peer brief` 三条验证命令与报错对照。
+
+### Docs
+
+- SKILL 新增「§0.4 参考文档可能本身就是错的」：小错（命令语法、视图、显示命令名）自行改用设备接受的写法
+  并在交付里注明；大错（拓扑或地址规划矛盾、关键步骤缺失、策略方向相反）停下来告知用户。
+  插件提示词与 MCP instructions 同步这一条。
+
 ## [0.3.1] - 2026-11-10
 
 ### Fixed
@@ -219,7 +236,8 @@
 - `ensp_cli` 改配置后自动 `save`（自动应答 `[Y/N]`），返回 `saved.ok`。
 - `start_all` / `stop_all` 点完工具栏后轮询控制台端口，不用猜启动耗时。
 
-[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.2...HEAD
+[0.3.2]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/YunoSeng/dsh-ensp/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.9...v0.3.0
 [0.2.9]: https://github.com/YunoSeng/dsh-ensp/compare/v0.2.8...v0.2.9

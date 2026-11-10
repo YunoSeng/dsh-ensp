@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
@@ -40,6 +40,7 @@ const LIB_ROOT = join(PACKAGE_ROOT, 'lib')
 const BRIDGE_PATH = join(LIB_ROOT, 'bridge.py')
 const LAUNCH_PATH = join(LIB_ROOT, 'launch.py')
 const DOCS_SCRIPT = join(LIB_ROOT, 'make_docs.py')
+const REF_SCRIPT = fileURLToPath(new URL('./lib/ref_dump.py', import.meta.url))
 const SKILL_ROOT = join(PACKAGE_ROOT, 'skills', 'ensp-automation')
 const SKILL_PATH = join(SKILL_ROOT, 'SKILL.md')
 
@@ -61,6 +62,7 @@ const PROMPT_SECTION = `## eNSP 实验自动化（dsh-ensp）
 - 设备需要改名时先问用户；要改名则按重要程度编号（SW1/SW2、AR1/AR2、FW1）；用户给了命名规则就以用户为准。
 - 优先接管已经打开的 eNSP；没有已打开的实例再找本机可用的 eNSP（任意版本）；发现多个版本时问用户用哪一个——不要自己挑。
 - 命令不确定就上网搜或先用 \`ensp_cli\` 试一条，再进配置；不要编造命令。
+- **参考文档（题目 docx / 课件 pptx）只当线索**：小错（命令语法、视图、显示命令名）用设备接受的写法继续做，并在交付里注明；大错（拓扑或地址规划矛盾、关键步骤缺失、策略方向相反）停下来告诉用户，不要臆造方案。
 - 防火墙（USG6000V）可能起不来或控制台无回显；遇到就告知用户并继续其余部分，不要卡住。
 - 将要接管鼠标（真实点击/拖拽）前必须提醒用户，并说明会还原鼠标位置。
 - 交付时列出本次实验改动过的所有密码，以及当前生效的账号/密码对照表（明文写在文档末尾和回复里）。
@@ -559,6 +561,14 @@ async function runOnDevice(entry, { devices, exec, config, bridge, echoArgs }) {
   }
 
   return { device: deviceName, port, prompt, results, echo, screenshot, transcript, saved, checks, ok, notes }
+}
+
+function statSyncSafe(path) {
+  try {
+    return statSync(path).mtimeMs
+  } catch (error) {
+    return 0
+  }
 }
 
 function createTools(config, bridge) {
@@ -1273,6 +1283,73 @@ function createTools(config, bridge) {
         devices: describeDevices(after),
         suggestions: action === 'suggest-names' ? suggestNames(after.devices) : [],
         written,
+        notes,
+      })
+    },
+  }))
+
+  tools.push(defineTool({
+    name: 'ensp_ref',
+    description: 'Convert a reference document (.docx / .pptx / .txt) into plain text in one call. Read that .txt afterwards instead of parsing the Office file again and again — long binary reads get compressed in transit and cost a round trip each time.',
+    parameters: {
+      path: { type: 'string', required: true, description: 'Reference file inside the workspace: .docx / .pptx / .txt / .md.' },
+      out: { type: 'string', description: 'Where to write the text; defaults to 工作区/笔记/<file name>.txt.' },
+      preview_chars: { type: 'integer', description: 'How many characters of the dump to return inline; defaults to 1200.' },
+      allow_overwrite: { type: 'boolean', description: 'Re-dump even if the .txt already exists and is newer; defaults to false (cache hit).' },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          out: { type: 'string', required: true },
+          kind: { type: 'string' },
+          chars: { type: 'integer' },
+          lines: { type: 'integer' },
+          cached: { type: 'boolean' },
+          preview: { type: 'string' },
+          notes: { type: 'array', items: { type: 'string' }, required: true },
+        },
+      },
+      render: (_args, value) => renderJson(value),
+    },
+    async execute(args, exec) {
+      const notes = []
+      const source = await resolveWorkspacePath(args.path, exec, config, { mustExist: true, kind: 'reference file' })
+      const base = basename(source).replace(/\.[^.]+$/u, '')
+      const out = args.out
+        ? await resolveWorkspacePath(args.out, exec, config, { kind: 'out' })
+        : join(dirname(source), `${base}.txt`)
+      const cached = existsSync(out) && statSyncSafe(out) >= statSyncSafe(source)
+      if (cached && args.allow_overwrite !== true) {
+        const text = readFileSync(out, 'utf8')
+        notes.push('已有更新的文本版本，直接复用（要强制重转传 allow_overwrite:true）。')
+        return lossless({
+          out, kind: extname(source).replace('.', ''), chars: text.length,
+          lines: text.split('\n').length, cached: true,
+          preview: text.slice(0, Number(args.preview_chars ?? 1200)), notes,
+        })
+      }
+      const python = await resolveDocsPython(config, notes)
+      const run = await runProcess(python, [REF_SCRIPT, source, out], { timeoutMs: 120000 })
+      if (run.code !== 0) {
+        throw new Error(`reference dump failed: ${run.stderr.trim() || run.stdout.trim()}`)
+      }
+      let parsed = {}
+      try {
+        parsed = JSON.parse(String(run.stdout ?? '').trim().split('\n').pop() ?? '{}')
+      } catch (error) {
+        parsed = {}
+      }
+      const text = readFileSync(out, 'utf8')
+      notes.push('后续直接读这个 .txt，不要再来回转 docx/pptx。')
+      return lossless({
+        out,
+        kind: parsed.kind ?? extname(source).replace('.', ''),
+        chars: parsed.chars ?? text.length,
+        lines: parsed.lines ?? text.split('\n').length,
+        cached: false,
+        preview: text.slice(0, Number(args.preview_chars ?? 1200)),
         notes,
       })
     },

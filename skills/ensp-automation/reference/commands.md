@@ -175,6 +175,48 @@ display current-configuration | include nat     # 兜底：直接看配置 ✅
 
 规则：**只用题目/用户给的口令**。不确定就一次传候选列表 `ensp_cli {"passwords":["Admin@123","Huawei@123"], …}`，工具按顺序重试并回报哪个通了；不要试 `Admin@1234` 这类自造变体。
 
+## 8.5 双机热备（HRP + VRRP）— USG
+
+两台防火墙用一条直连做心跳（本例 GE1/0/3），**两台都要配**：
+
+```text
+hrp enable
+hrp interface GigabitEthernet1/0/3 remote 10.10.0.2   # 指向对端心跳地址
+hrp track interface GigabitEthernet1/0/1               # 上行链路故障触发切换
+hrp preempt delay 300                                  # 抢占延时（秒）
+hrp mirror session enable                              # 会话表镜像
+hrp priority 64000                                     # 主设备优先级：system-view 下，别在接口视图敲
+```
+
+负载分担靠 **VRRP 分组各自主备**，不是一条命令：
+
+```text
+interface GigabitEthernet1/0/2
+ vrrp vrid 1 virtual-ip 10.3.0.1 active     # FW_A 组1 active / 组2 standby
+ vrrp vrid 2 virtual-ip 10.3.0.2 standby    # FW_B 正好相反
+```
+
+验证（这三条最有用）：
+
+| 命令 | 看什么 |
+| --- | --- |
+| `display hrp state` | `Role: active, peer: active` 表示负载分担；正常主备是 active/standby |
+| `display vrrp brief` | 每台各有一组 Master、一组 Backup → 负载分担生效 |
+| `display ospf peer brief` | 心跳/上行网段 OSPF 邻居是否 Full |
+
+报错对照：
+
+| 现象 | 处理 |
+| --- | --- |
+| `hrp priority 64000` → `Unrecognized command` | 在接口视图里敲了，退出到 system-view |
+| `display hrp tcp status` / `display hrp track` → Unrecognized / Incomplete | USG6000V 没有这些命令，用 `display hrp state` |
+| `display hrp configuration` → Incomplete | 用 `display current-configuration | include hrp` |
+| `display firewall session table \| include OSPF` → `Too many parameters` | 改用 `display firewall session table verbose` 或 `display firewall session table destination <ip>` |
+
+> eNSP 仿真现象：PC 模拟器不响应免费 ARP。主备切换后 PC 的网关 MAC 仍指向旧设备，
+> 业务会短暂不通（`arp -d` 可立即恢复）。真实设备无此问题——出文档时用另一台 PC 的结果作证据，
+> 并在备注里写明这是仿真器限制。
+
 ## 9. 报错 → 处理
 
 | 回显 | 含义 | 处理 |
