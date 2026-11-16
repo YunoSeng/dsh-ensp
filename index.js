@@ -330,7 +330,22 @@ async function captureWindow(spec, { devices, bridge, config, exec }) {
       }
       throw new Error(`设备窗口「${title}」打不开：面板可能不在可见画布内（试过 ${outcome.tried} 个图标位置）。`)
     }
-    steps.push({ op: 'shot', title, out, crop: spec.crop })
+    if (Array.isArray(spec.window) && spec.window.length >= 2) {
+      // Optional enlargement before the shot (ensp_shot device … window:[1180,820]).
+      steps.push({ op: 'resize', title, w: Number(spec.window[0]), h: Number(spec.window[1]) })
+      steps.push({ op: 'sleep', t: 0.5 })
+    }
+    steps.push({
+      op: 'shot',
+      title,
+      out,
+      crop: spec.crop,
+      // Report screenshots keep the window title row (the reader must know which
+      // device it is) and then shave the uniform console background underneath,
+      // so the PNG is title + transcript instead of title + a tall black column.
+      client: spec.client === true,
+      trim: spec.trim !== false,
+    })
     notes.push(`设备窗口来源：${outcome.method}。`)
   } else {
     steps.push(spec.hwnd
@@ -813,6 +828,38 @@ function createTools(config, bridge) {
 
       // Device consoles need several seconds to come up (or go down); poll the
       // console ports so the caller does not have to guess or sleep blindly.
+      // eNSP reports device start failures in a modal dialog of its own. While that
+      // dialog is up nothing else can be clicked and no port will ever open, so it
+      // is worth catching explicitly: screenshot it, then close it.
+      async function findStartupDialog() {
+        let wins = []
+        try {
+          const listed = await bridge.steps([{ op: 'windows', visible_only: true }])
+          wins = listed.steps?.[0]?.windows ?? []
+        } catch (error) {
+          return null
+        }
+        const titles = wins.map((item) => String(item.title ?? '').trim()).filter(Boolean)
+        const hit = titles.find((title) => /^(信息|错误|警告|失败|提示|Error|Warning)$/iu.test(title))
+        if (!hit) return null
+        const stamp = new Date().toISOString().slice(11, 19).replace(/[:.]/gu, '-')
+        let screenshot = ''
+        try {
+          const out = await resolveWorkspacePath(`工作区/截图/_ensp_dialog_${stamp}.png`, exec, config, { kind: 'out' })
+          await prepareOutput(out, true, 'out')
+          await bridge.steps([{ op: 'shot', title: hit, out, client: true, trim: true }])
+          screenshot = out
+        } catch (error) {
+          screenshot = '(截图失败)'
+        }
+        try {
+          await bridge.steps([{ op: 'close', title: hit }])
+        } catch (error) {
+          // leave it open; the note already tells the caller
+        }
+        return { title: hit, screenshot }
+      }
+
       // Function declaration (not a const arrow) so wait_ports can call it from
       // inside the step loop, which runs before this point in the source.
       async function watchPorts(ports, want, timeoutMs) {
@@ -830,7 +877,15 @@ function createTools(config, bridge) {
         const ports = devices.filter((device) => device.comPort > 0).map((device) => device.comPort)
         if (startAllRequested && ports.length > 0) {
           let open = await watchPorts(ports, 'open', args.start_wait_ms ?? 25000)
-          if (open.length === 0) {
+          // eNSP reports device start failures in its own modal dialog ("信息 /
+          // 启动设备 R2 失败 / 错误代码 40"). Waiting on ports while that dialog is
+          // up is pure lost time, so surface it (with a screenshot) right away.
+          const blocked = await findStartupDialog()
+          if (blocked) {
+            notes.push(`eNSP 弹出对话框「${blocked.title}」挡住了启动，截图：${blocked.screenshot}。`
+              + '这是 eNSP/虚拟机侧的错误（常见错误代码 40 = 虚拟机起不来），不是点击坐标的问题：'
+              + '先关掉对话框，用 {op:"kill"} 重开 eNSP，或检查 VirtualBox 是否正常（VBoxSVC 起不来的话所有设备都会失败）。')
+          } else if (open.length === 0) {
             // Every console dead right after a start click usually means the click
             // missed (canvas not rendered yet) or the topology was just reopened.
             // Reselect and press start once more before giving up.
@@ -852,7 +907,11 @@ function createTools(config, bridge) {
           if (missing.length === 0) {
             notes.push(`全部 ${ports.length} 个控制台端口已开放（${open.join(', ')}），可以开始下发命令。`)
           } else {
-            notes.push(`这些控制台端口还没通：${missing.join(', ')}。常见原因：设备还在启动、防火墙/虚拟机起不来，或该设备本来就没有控制台。需要等待时用 {op:"wait_ports"}，不要用 sleep 盲等。`)
+            notes.push(`这些控制台端口还没通：${missing.join(', ')}。常见原因：设备还在启动、防火墙/虚拟机起不来，或该设备本来就没有控制台。需要等待时用 {op:"wait_ports"}，不要用 sleep 盲等。`
+              + '若 eNSP 是本插件启动的（而不是你先手动开好的），部分受限环境会让它的代理进程建不了管道，'
+              + '设备全部起不来——去 %LOCALAPPDATA%\\eNSP\\Log\\VBoxServer_<日期>.log 里搜 "Failed to create pipe"，'
+              + '命中就手动双击启动 eNSP，再让插件接管。')
+
           }
         }
         if (stopAllRequested && ports.length > 0) {
@@ -889,6 +948,8 @@ function createTools(config, bridge) {
       device: { type: 'string', description: 'Device window title when target=device (e.g. SW1).' },
       hwnd: { type: 'integer', description: 'Explicit window handle instead of a name.' },
       crop: { type: 'array', items: { type: 'integer' }, description: 'Optional [x, y, width, height] crop in image pixels.' },
+      client: { type: 'boolean', description: 'Device shots: capture only the client area (drops the window title rail). Defaults to false so report readers can see which device the shot is from.' },
+      trim: { type: 'boolean', description: 'Device shots: crop the empty console background below the last line; defaults to true.' },
       topology_path: { type: 'string', description: 'Needed when target=device and that window is not visible yet (it is then opened by double-clicking the device icon).' },
       allow_overwrite: { type: 'boolean', description: 'Replace an existing file; defaults to false.' },
       shots: {
@@ -923,6 +984,8 @@ function createTools(config, bridge) {
             device: args.device,
             hwnd: args.hwnd,
             crop: args.crop,
+            client: args.client,
+            trim: args.trim,
           }]
       let devices = null
       if (args.topology_path || specs.some((spec) => spec?.topology_path)) {
@@ -967,6 +1030,11 @@ function createTools(config, bridge) {
         description: '[{device, commands:["display …"], out, expect?, settle_ms?, gap_ms?, keep_open?, force?}]. Commands are typed into the window so they run again; keep each entry to 1–4 short display commands so the screenshot fits. When expect is given (index-aligned with commands, same syntax as ensp_cli), the commands are first checked over telnet and the screenshot is skipped unless they pass — that is what keeps you from shooting a screen you would then have to read.',
       },
       allow_overwrite: { type: 'boolean', description: 'Replace existing PNGs; defaults to true here.' },
+      window: {
+        type: 'array',
+        items: { type: 'integer' },
+        description: 'Enlarge every device window to this [width, height] before typing; defaults to [1180, 820]. A bigger console wraps less and shows more lines, and the PNG is cropped to its client area.',
+      },
       allow_cursor_takeover: { type: 'boolean', description: 'Acknowledge that opening windows uses real clicks; the pointer is restored afterwards.' },
     },
     output: {
@@ -1041,13 +1109,21 @@ function createTools(config, bridge) {
         }
         const gap = Number(spec.gap_ms ?? 900) / 1000
         const settle = Number(spec.settle_ms ?? 1600) / 1000
+        // A 660×450 console wraps "protocol" as "protoco / l" and hides most of a
+        // config dump. Enlarge the window first, then capture only its client area.
+        const size = Array.isArray(spec.window)
+          ? spec.window
+          : (Array.isArray(args.window) ? args.window : [1180, 820])
+        const steps = []
+        if (spec.resize !== false && Array.isArray(size) && size.length >= 2) {
+          steps.push({ op: 'resize', title: device, w: Number(size[0]), h: Number(size[1]) })
+          steps.push({ op: 'sleep', t: 0.6 })
+        }
         // Activate + a bare Enter first: an idle console has logged out and the
         // first keystroke only wakes it.
-        const steps = [
-          { op: 'activate', title: device },
-          { op: 'safetype', title: device, text: '\n', per_char: 0.02 },
-          { op: 'sleep', t: 0.5 },
-        ]
+        steps.push({ op: 'activate', title: device })
+        steps.push({ op: 'safetype', title: device, text: '\n', per_char: 0.02 })
+        steps.push({ op: 'sleep', t: 0.5 })
         for (const command of commands) {
           steps.push({ op: 'safetype', title: device, text: `${command}\n`, per_char: 0.05 })
           steps.push({ op: 'sleep', t: gap })
@@ -1056,7 +1132,8 @@ function createTools(config, bridge) {
         // Re-activate right before the shot: an occluded console keeps a stale DC.
         steps.push({ op: 'activate', title: device })
         steps.push({ op: 'sleep', t: 0.2 })
-        steps.push({ op: 'shot', title: device, out })
+        steps.push({ op: 'shot', title: device, out, client: spec.client === true, trim: spec.trim !== false })
+
         // Keep the window when the same device shows up again later in the list
         // (otherwise the user sees the same window pop open several times).
         const reused = list.slice(index + 1).some((rest) => rest?.device === device)

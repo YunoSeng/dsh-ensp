@@ -348,16 +348,26 @@ def wnd_at(x, y):
 
 # ------------------------------------------------------------------ capture
 
-def capture(hwnd, out_path, crop=None, mode="blit"):
+def capture(hwnd, out_path, crop=None, mode="blit", client=False, trim=False, trim_margin=6):
     """Grab a window's pixels.
 
     ``mode="blit"`` (default) copies from the window DC: fast, occlusion proof,
     no elevation needed.  ``mode="print"`` asks the window to paint itself.
+    ``client=True`` copies only the client area (no title bar / borders), and
+    ``trim=True`` then shaves the uniform background margin so the PNG is the
+    transcript itself rather than a dark rectangle with empty space around it.
     """
     rect = win32gui.GetWindowRect(hwnd)
     width, height = rect[2] - rect[0], rect[3] - rect[1]
     if width <= 0 or height <= 0:
         raise RuntimeError("window has no area: %r" % (rect,))
+    origin = (0, 0)
+    if client:
+        crect = win32gui.GetClientRect(hwnd)
+        if crect[2] > 0 and crect[3] > 0:
+            screen_origin = win32gui.ClientToScreen(hwnd, (0, 0))
+            origin = (screen_origin[0] - rect[0], screen_origin[1] - rect[1])
+            width, height = crect[2], crect[3]
     # A window that is covered or was never foreground keeps a stale device
     # context, and BitBlt then returns the previous screen. Ask it to repaint
     # first; for eNSP consoles this is the difference between a fresh transcript
@@ -383,7 +393,7 @@ def capture(hwnd, out_path, crop=None, mode="blit"):
         if mode == "print":
             user32.PrintWindow(hwnd, mem.GetSafeHdc(), 2)
         else:
-            mem.BitBlt((0, 0), (width, height), src, (0, 0), win32con.SRCCOPY)
+            mem.BitBlt((0, 0), (width, height), src, origin, win32con.SRCCOPY)
         os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
         bmp.SaveBitmapFile(mem, out_path)
     finally:
@@ -398,6 +408,8 @@ def capture(hwnd, out_path, crop=None, mode="blit"):
             win32gui.ReleaseDC(hwnd, hdc)
 
     result = {"out": out_path, "width": width, "height": height, "mode": mode}
+    if client:
+        result["client"] = True
     if out_path.lower().endswith((".png", ".jpg", ".jpeg")):
         if Image is None:
             raise RuntimeError("Pillow missing: cannot write %s" % out_path)
@@ -407,9 +419,113 @@ def capture(hwnd, out_path, crop=None, mode="blit"):
                 x, y, w, h = (int(v) for v in crop)
                 img = img.crop((x, y, x + w, y + h))
                 result["cropped"] = [x, y, w, h]
+            if trim:
+                trimmed = _trim_uniform(img, int(trim_margin))
+                if trimmed is not None and trimmed.size != img.size:
+                    result["trimmed"] = list(trimmed.size)
+                    img = trimmed
             img.save(out_path)
             result["width"], result["height"] = img.size
     return result
+
+
+def _dominant_color(img):
+    """The most common pixel colour: the real background of a console window.
+
+    Sampling the corner is wrong once the title bar is kept - the corner is the
+    title bar gradient, so nothing at all would be trimmed.  The dominant colour
+    of a transcript screenshot is the console background itself.
+    """
+    try:
+        colors = img.getcolors(maxcolors=1 << 24)
+    except Exception:
+        return None
+    if not colors:
+        return None
+    return max(colors, key=lambda item: item[0])[1]
+
+
+def _row_has_ink(pixels, width, y, background, tolerance, min_hits=4):
+    """True when the row carries at least a few transcript pixels."""
+    br, bg_, bb = background
+    hits = 0
+    for x in range(0, width, 2):
+        r, g, b = pixels[x, y][:3]
+        if abs(r - br) > tolerance or abs(g - bg_) > tolerance or abs(b - bb) > tolerance:
+            hits += 1
+            if hits >= min_hits:
+                return True
+    return False
+
+
+def _trim_uniform(img, margin=6, frame=None, tolerance=16):
+    """Crop away the empty background a console window leaves around its text.
+
+    A plain bounding box is not enough once the title rail is kept: the frame
+    line and the title itself touch every edge, so the box is the whole window.
+    Instead empty rows/columns are peeled off from each side (the outer ``frame``
+    pixels are ignored so the 1-2 px window border does not count as content),
+    which keeps the title row and the transcript and drops the tall black column
+    underneath the last line.
+    """
+    try:
+        from PIL import Image as PILImage
+    except Exception:
+        return None
+    try:
+        background_color = _dominant_color(img) or img.getpixel((0, 0))
+        if not isinstance(background_color, tuple):
+            return None
+        br, bg_, bb = background_color[:3]
+        pixels = img.load()
+        width, height = img.size
+        step = 2
+        sampled = len(range(0, width, step))
+
+        def row_ratio(y):
+            hits = 0
+            for x in range(0, width, step):
+                r, g, b = pixels[x, y][:3]
+                if abs(r - br) > tolerance or abs(g - bg_) > tolerance or abs(b - bb) > tolerance:
+                    hits += 1
+            return hits / sampled if sampled else 0.0
+
+        # Phase 1: the solid band at the top is the window title rail plus the
+        # device tab strip. It must survive the crop, because the report reader
+        # has to see which device the transcript belongs to.
+        head_end = -1
+        y = 0
+        while y < height:
+            if row_ratio(y) >= 0.45:
+                head_end = y
+                y += 1
+                continue
+            if head_end >= 0 and y > head_end + 2:
+                break
+            y += 1
+        if head_end < 0:
+            head_end = 0
+
+        # Phase 2: the last row that still carries transcript pixels. Rows made
+        # of the window border (a solid light band) or of the empty console
+        # background do not count, so the tall black column disappears.
+        content_end = head_end
+        y = height - 1
+        while y > head_end:
+            if row_ratio(y) < 0.45 and _row_has_ink(pixels, width, y, (br, bg_, bb), tolerance):
+                content_end = y
+                break
+            y -= 1
+
+        if content_end <= head_end:
+            return None
+        bottom = min(height, content_end + 1 + margin)
+        if bottom >= height:
+            return None
+        return img.crop((0, 0, width, bottom))
+    except Exception:
+        return None
+
 
 
 def window_exists(hwnd):
@@ -726,9 +842,13 @@ def click_guarded(x, y, expect=None, raise_first=True, **kwargs):
 
 
 def resize(hwnd, x, y, width, height):
+    if x is None or y is None:
+        rect = win32gui.GetWindowRect(hwnd)
+        x = rect[0] if x is None else x
+        y = rect[1] if y is None else y
     win32gui.SetWindowPos(hwnd, win32con.HWND_TOP, int(x), int(y), int(width), int(height),
                           win32con.SWP_SHOWWINDOW)
-    time.sleep(0.2)
+    time.sleep(0.25)
     return window_info(hwnd)
 
 
@@ -1018,7 +1138,9 @@ def dispatch(op, args):
         return {"exists": window_exists(args.get("hwnd"))}
     if op == "shot":
         hwnd = resolve_target(args)
-        return capture(hwnd, args["out"], args.get("crop"), args.get("mode", "blit"))
+        return capture(hwnd, args["out"], args.get("crop"), args.get("mode", "blit"),
+                       client=bool(args.get("client")), trim=bool(args.get("trim")),
+                       trim_margin=int(args.get("trim_margin", 6)))
     if op == "show":
         hwnd = find_window(args.get("title"), args.get("hwnd"), args.get("cls"),
                            include_hidden=True)
@@ -1033,7 +1155,7 @@ def dispatch(op, args):
         return {"window": focus(hwnd, args.get("restore", True))}
     if op == "resize":
         hwnd = resolve_target(args)
-        return {"window": resize(hwnd, args["x"], args["y"], args["w"], args["h"])}
+        return {"window": resize(hwnd, args.get("x"), args.get("y"), args["w"], args["h"])}
     if op == "close":
         hwnd = resolve_target(args)
         return close_window(hwnd)
